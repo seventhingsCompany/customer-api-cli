@@ -46,9 +46,9 @@ func renderHalfBlocks(img image.Image, maxCols, maxRows int) string {
 		th++ // whole cells
 	}
 
-	px := func(x, y int) (color.RGBA64, bool) {
+	px := func(x, y int) (color.NRGBA64, bool) {
 		if y >= th {
-			return color.RGBA64{}, false
+			return color.NRGBA64{}, false
 		}
 		c := boxAverage(img, b, x, y, tw, th)
 		return c, c.A >= alphaCutoff
@@ -79,9 +79,10 @@ func renderHalfBlocks(img image.Image, maxCols, maxRows int) string {
 }
 
 // boxAverage returns the average colour of the source area that maps to the
-// target pixel (x, y) of a tw × th image. Colours are premultiplied, so
-// transparent pixels do not darken the edges.
-func boxAverage(img image.Image, b image.Rectangle, x, y, tw, th int) color.RGBA64 {
+// target pixel (x, y) of a tw × th image, with straight (non-premultiplied)
+// alpha. Colours are averaged premultiplied, so transparent pixels do not
+// darken the edges.
+func boxAverage(img image.Image, b image.Rectangle, x, y, tw, th int) color.NRGBA64 {
 	x0 := b.Min.X + x*b.Dx()/tw
 	x1 := max(b.Min.X+(x+1)*b.Dx()/tw, x0+1)
 	y0 := b.Min.Y + y*b.Dy()/th
@@ -95,16 +96,16 @@ func boxAverage(img image.Image, b image.Rectangle, x, y, tw, th int) color.RGBA
 		}
 	}
 	if a == 0 {
-		return color.RGBA64{}
+		return color.NRGBA64{}
 	}
 	// Un-premultiply for display.
-	return color.RGBA64{
+	return color.NRGBA64{
 		R: uint16(r * 0xffff / a), G: uint16(g * 0xffff / a), B: uint16(bl * 0xffff / a),
 		A: uint16(a / n),
 	}
 }
 
-func rgb(c color.RGBA64) string {
+func rgb(c color.NRGBA64) string {
 	return fmt.Sprintf("%d;%d;%d", c.R>>8, c.G>>8, c.B>>8)
 }
 

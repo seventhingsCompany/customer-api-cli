@@ -53,6 +53,14 @@ func viewerPath(uuid, name string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	// The UUID comes from the API; keep only UUID characters so it cannot
+	// point outside dir.
+	uuid = strings.Map(func(r rune) rune {
+		if r == '-' || '0' <= r && r <= '9' || 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' {
+			return r
+		}
+		return -1
+	}, uuid)
 	name = strings.Map(func(r rune) rune {
 		if strings.ContainsRune(`/\:*?"<>|`, r) || r < 32 {
 			return '_'

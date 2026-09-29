@@ -3,6 +3,7 @@ package tui
 import (
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -140,5 +141,23 @@ func TestViewerPathSanitizes(t *testing.T) {
 	}
 	if !strings.HasSuffix(p, "u1-.._.._evil_name_.pdf") || strings.Contains(p[len(os.TempDir()):], "..\\") {
 		t.Errorf("path %q", p)
+	}
+	p, err = viewerPath("../../x", "a.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(p) != filepath.Join(os.TempDir(), "seventhings-files") || filepath.Base(p) != "x-a.pdf" {
+		t.Errorf("uuid escaped the directory: %q", p)
+	}
+}
+
+func TestFirstAttachmentSkipsReferences(t *testing.T) {
+	task := Item{"references": []any{map[string]any{"type": "asset", "uuid": "obj-1", "name": "Laptop", "id": 3}}}
+	if u, _ := firstAttachment(task); u != "" {
+		t.Errorf("reference taken as attachment: %q", u)
+	}
+	task["documents"] = []any{map[string]any{"uuid": "f1", "name": "a.pdf", "type": "application/pdf", "size": 10}}
+	if u, _ := firstAttachment(task); u != "f1" {
+		t.Errorf("got %q, want f1", u)
 	}
 }

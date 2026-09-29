@@ -112,6 +112,32 @@ func TestDetailShowsPicture(t *testing.T) {
 	}
 }
 
+func TestFailedPictureIsRetried(t *testing.T) {
+	f := newFakeAPI(t)
+	fail := true
+	f.extra = map[string]http.HandlerFunc{
+		"GET object/o1": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"asset_uuid":"o1","inventory_name":"Laptop Dell","picture":[{"uuid":"img1","name":"front.png","type":"image/png"}]}`))
+		},
+		"GET file/img1/thumbnail": func(w http.ResponseWriter, r *http.Request) {
+			if fail {
+				w.WriteHeader(503)
+				return
+			}
+			_, _ = w.Write(testPNG(t))
+		},
+	}
+	d := newDriver(t, &fakeDeps{url: f.srv.URL, loggedIn: true})
+	d.key("enter")
+	d.expect("inventory_name")
+	if strings.Contains(d.screen(), "▀") {
+		t.Fatal("picture shown despite error")
+	}
+	fail = false
+	d.key("p", "p")
+	d.expect("▀")
+}
+
 func TestDetailPictureFallsBackToFullFile(t *testing.T) {
 	f := newFakeAPI(t)
 	f.extra = map[string]http.HandlerFunc{

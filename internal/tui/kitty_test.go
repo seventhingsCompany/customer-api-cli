@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"image"
+	"image/color"
 	"net/http"
 	"strings"
 	"testing"
@@ -154,8 +156,9 @@ func TestImageModes(t *testing.T) {
 	d = newDriver(t, &fakeDeps{url: f2.srv.URL, loggedIn: true, env: map[string]string{"SEVENTHINGS_IMAGES": "off"}})
 	d.key("enter")
 	d.expect("inventory_name")
-	if strings.Contains(d.screen(), "p hides") || strings.Contains(d.screen(), "picture hidden") || f2.called("GET file/") {
-		t.Errorf("off mode fetched or mentioned pictures:\n%s", d.screen())
+	d.key("p")
+	if s := d.screen(); strings.Contains(s, "p hides") || strings.Contains(s, "picture hidden") || strings.Contains(s, "p picture") || f2.called("GET file/") {
+		t.Errorf("off mode fetched or mentioned pictures:\n%s", s)
 	}
 }
 
@@ -166,5 +169,29 @@ func TestScaleDown(t *testing.T) {
 	}
 	if scaleDown(img, 2000, 2000) != image.Image(img) {
 		t.Error("upscaled")
+	}
+}
+
+func TestScaleDownKeepsTransparentColours(t *testing.T) {
+	// One opaque white pixel next to two transparent ones averages to white
+	// at a third of the alpha, not to a wrapped or brightened colour.
+	img := image.NewNRGBA(image.Rect(0, 0, 3, 1))
+	img.SetNRGBA(0, 0, color.NRGBA{255, 255, 255, 255})
+	got := scaleDown(img, 1, 1).At(0, 0).(color.NRGBA64)
+	if got.R != 0xffff || got.G != 0xffff || got.B != 0xffff || got.A != 0x5555 {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestKittyEvictsOldSizes(t *testing.T) {
+	k := newKittyState(true)
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	id1, _ := k.place("u1", img, 4, 2)
+	id2, cmd := k.place("u1", img, 6, 3)
+	if id1 == id2 || len(k.ids) != 1 {
+		t.Fatalf("ids %v", k.ids)
+	}
+	if seq := fmt.Sprint(cmd()); !strings.Contains(seq, kittyDelete(id1)) {
+		t.Errorf("old image %d not deleted", id1)
 	}
 }

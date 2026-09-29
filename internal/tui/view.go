@@ -197,7 +197,7 @@ func (m *Model) keyHelp() string {
 		return "↑↓ scroll · esc back"
 	case modeDetail:
 		keys = append(keys, "↑↓ scroll", "esc back")
-		if u, _ := pictureFile(m.detailItem); u != "" {
+		if u, _ := pictureFile(m.detailItem); u != "" && m.imageMode != imagesOff {
 			keys = append(keys, "p picture")
 		}
 		if u, _ := firstAttachment(m.detailItem); u != "" || r.download != nil {

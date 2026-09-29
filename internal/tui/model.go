@@ -536,6 +536,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeList
 			return m, nil
 		case "p":
+			if m.imageMode == imagesOff {
+				return m, nil
+			}
 			m.hidePictures = !m.hidePictures
 			return m, tea.Batch(m.loadPicture(), m.refreshDetail())
 		}
@@ -1083,7 +1086,8 @@ func (m *Model) loadPicture() tea.Cmd {
 	uuid, _ := pictureFile(m.detailItem)
 	full := m.gfx != gfxBlocks
 	key := pictureKey(uuid, full)
-	if m.hidePictures || uuid == "" || m.pictures[key] != nil {
+	// A failed fetch is retried the next time the picture is needed.
+	if p := m.pictures[key]; m.hidePictures || uuid == "" || p != nil && p.err == nil {
 		return nil
 	}
 	m.pictures[key] = &picture{loading: true}
@@ -1166,7 +1170,8 @@ func (m *Model) renderDetail() (string, tea.Cmd) {
 		m.pane.img, m.pane.uuid, m.pane.cols, m.pane.rows = p.img, uuid, c, r
 	}
 	// The caption sits above the picture, so an image never covers it.
-	caption := dimStyle.Render(truncate(name, cols) + " · p hides · O opens")
+	const hints = " · p hides · O opens"
+	caption := dimStyle.Render(truncate(truncate(name, max(cols-lipgloss.Width(hints), 1))+hints, cols))
 	m.pane.content = lipgloss.JoinVertical(lipgloss.Left, caption, pic)
 	m.pane.side = side
 
@@ -1287,7 +1292,8 @@ func (m *Model) openInViewer(r *resource, it Item) tea.Cmd {
 	})
 }
 
-// firstAttachment returns the first attached file of any type.
+// firstAttachment returns the first attached file of any type. Files are
+// told apart from other object lists (e.g. task references) by their size.
 func firstAttachment(it Item) (uuid, name string) {
 	keys := make([]string, 0, len(it))
 	for k := range it {
@@ -1298,7 +1304,7 @@ func firstAttachment(it Item) (uuid, name string) {
 		files, _ := it[k].([]any)
 		for _, raw := range files {
 			f, _ := raw.(map[string]any)
-			if u := str(f["uuid"]); u != "" && f["name"] != nil {
+			if u := str(f["uuid"]); u != "" && f["name"] != nil && f["size"] != nil {
 				return u, str(f["name"])
 			}
 		}

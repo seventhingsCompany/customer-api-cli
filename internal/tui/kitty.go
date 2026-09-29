@@ -119,8 +119,7 @@ func scaleDown(img image.Image, maxW, maxH int) image.Image {
 	out := image.NewNRGBA64(image.Rect(0, 0, tw, th))
 	for y := range th {
 		for x := range tw {
-			c := boxAverage(img, b, x, y, tw, th)
-			out.Set(x, y, c)
+			out.SetNRGBA64(x, y, boxAverage(img, b, x, y, tw, th))
 		}
 	}
 	return out
@@ -145,21 +144,28 @@ func newKittyState(enabled bool) kittyState {
 }
 
 // place returns the image ID for uuid at cols×rows, and the escape sequence
-// to transmit it if it is new.
+// to transmit it if it is new. Earlier sizes of the same file are deleted,
+// so resizing does not pile up images in the terminal.
 func (k *kittyState) place(uuid string, img image.Image, cols, rows int) (id int, transmit tea.Cmd) {
 	key := kittyKey{uuid, cols, rows}
 	if id, ok := k.ids[key]; ok {
 		return id, nil
 	}
+	seq, err := kittyTransmit(img, k.nextID, cols, rows, k.cellW, k.cellH)
+	if err != nil {
+		return 0, nil
+	}
+	var stale strings.Builder
+	for old, oldID := range k.ids {
+		if old.uuid == uuid {
+			stale.WriteString(kittyDelete(oldID))
+			delete(k.ids, old)
+		}
+	}
 	id = k.nextID
 	k.nextID++
 	k.ids[key] = id
-	seq, err := kittyTransmit(img, id, cols, rows, k.cellW, k.cellH)
-	if err != nil {
-		delete(k.ids, key)
-		return 0, nil
-	}
-	return id, tea.Raw(seq)
+	return id, tea.Raw(stale.String() + seq)
 }
 
 // cleanup deletes every transmitted image.
