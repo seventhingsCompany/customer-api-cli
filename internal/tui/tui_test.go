@@ -220,8 +220,10 @@ func (d *driver) send(msg tea.Msg) {
 }
 
 // exec runs cmd and feeds its messages back. Timers (spinner ticks, cursor
-// blinks) are dropped so the loop terminates.
+// blinks) are dropped so the loop terminates, but tracked operations must
+// finish before tests assert on their results (Windows file sync can be slow).
 func (d *driver) exec(cmd tea.Cmd) {
+	d.t.Helper()
 	if cmd == nil {
 		return
 	}
@@ -231,7 +233,14 @@ func (d *driver) exec(cmd tea.Cmd) {
 	select {
 	case msg = <-ch:
 	case <-time.After(150 * time.Millisecond):
-		return // a timer; irrelevant for tests
+		if d.m.loading == 0 {
+			return // an untracked animation timer; irrelevant for tests
+		}
+		select {
+		case msg = <-ch:
+		case <-time.After(5 * time.Second):
+			d.t.Fatalf("command did not complete with %d operation(s) pending", d.m.loading)
+		}
 	}
 	switch msg := msg.(type) {
 	case nil, spinner.TickMsg:

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/SeventhingsCompany/customer-api-go/client"
@@ -205,7 +206,12 @@ func TestDownloadOverwriteConfirmation(t *testing.T) {
 		"GET files": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"items":[{"uuid":"f1","name":"note.txt"}]}`))
 		},
-		"GET file/f1/data": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("new")) },
+		"GET file/f1/data": func(w http.ResponseWriter, _ *http.Request) {
+			// Keep the operation pending past the driver's animation timeout,
+			// as a slow Windows download/file sync would.
+			time.Sleep(300 * time.Millisecond)
+			_, _ = w.Write([]byte("new"))
+		},
 	}
 	d := newDriver(t, &fakeDeps{url: f.srv.URL, loggedIn: true})
 	d.key("8")
@@ -228,6 +234,22 @@ func TestDownloadOverwriteConfirmation(t *testing.T) {
 		if b, err := os.ReadFile(path); err != nil || string(b) != want {
 			t.Fatalf("answer %s: %q, %v", answer, b, err)
 		}
+		if d.m.loading != 0 || d.m.statusErr {
+			t.Fatalf("answer %s did not finish successfully: loading=%d status=%q", answer, d.m.loading, d.m.status)
+		}
+	}
+}
+
+func TestDriverWaitsForSlowOperation(t *testing.T) {
+	d := &driver{t: t, m: New(context.Background(), &fakeDeps{loggedIn: true})}
+	d.exec(d.m.async(0, func() tea.Msg {
+		// Deliberately exceed the cursor-animation timeout. A real request or
+		// filesystem sync must finish before the driver asserts on its result.
+		time.Sleep(300 * time.Millisecond)
+		return doneMsg{text: "Slow operation completed"}
+	}))
+	if d.m.loading != 0 || d.m.writing != 0 || d.m.status != "Slow operation completed" {
+		t.Fatalf("driver returned before the operation completed: loading=%d writing=%d status=%q", d.m.loading, d.m.writing, d.m.status)
 	}
 }
 
