@@ -133,6 +133,7 @@ should read this instead of parsing --help.`,
 					"SEVENTHINGS_RATE_LIMIT":       "requests per minute (default 200, 0 disables)",
 					"SEVENTHINGS_CONFIG_DIR":       "config directory",
 					"SEVENTHINGS_CREDENTIAL_STORE": "keyring or file",
+					"SEVENTHINGS_IMAGES":           "picture rendering in the UI: auto, kitty, iterm2, sixel, blocks, off",
 				},
 				"rate_limit": map[string]any{
 					"default_per_minute": ratelimit.DefaultPerMinute,

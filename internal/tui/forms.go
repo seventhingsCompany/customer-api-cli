@@ -269,7 +269,7 @@ func newRecordForm(title string, fields []*editField, width int) *recordForm {
 			g.Title(title)
 		}
 	}
-	rf.form = huh.NewForm(groups...).WithWidth(width).WithShowHelp(true)
+	rf.form = huh.NewForm(groups...).WithWidth(width).WithShowHelp(true).WithTheme(formTheme)
 	return rf
 }
 
@@ -355,7 +355,7 @@ func newLoginForm(url, clientID, username string, width int) *loginForm {
 		huh.NewInput().Title("Client ID").Value(&lf.clientID).Validate(nonEmpty("client ID")),
 		huh.NewInput().Title("Username").Value(&lf.username).Validate(nonEmpty("username")),
 		huh.NewInput().Title("Password").EchoMode(huh.EchoModePassword).Value(&lf.password).Validate(nonEmpty("password")),
-	).Title("Log in to seventhings")).WithWidth(width).WithShowHelp(true)
+	).Title("Log in to seventhings")).WithWidth(width).WithShowHelp(true).WithTheme(formTheme)
 	return lf
 }
 
@@ -379,7 +379,7 @@ func newPathForm(title, initial string, mustExist bool, width int) *pathForm {
 			}
 			return nil
 		}),
-	)).WithWidth(width).WithShowHelp(true)
+	)).WithWidth(width).WithShowHelp(true).WithTheme(formTheme)
 	return pf
 }
 

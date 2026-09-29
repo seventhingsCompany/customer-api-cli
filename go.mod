@@ -9,6 +9,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/SeventhingsCompany/customer-api-go v1.4.0
 	github.com/charmbracelet/colorprofile v0.4.3
+	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20260927004216-9c77d672503d
 	github.com/itchyny/gojq v0.12.19
@@ -23,8 +24,8 @@ require (
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-udiff v0.4.1 // indirect
+	github.com/bits-and-blooms/bitset v1.24.6 // indirect
 	github.com/catppuccin/go v0.2.0 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886 // indirect
 	github.com/charmbracelet/x/exp/golden v0.0.0-20251109135125-8916d276318f // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
 	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect

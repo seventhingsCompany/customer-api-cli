@@ -49,6 +49,8 @@ func (d tuiDeps) Login(ctx context.Context, url, clientID, username, password st
 	return nil
 }
 
+func (d tuiDeps) Env(key string) string { return d.a.getenv(key) }
+
 func (d tuiDeps) Profile() (name, url, clientID, username string) {
 	a := d.a
 	name, p := a.profile()
@@ -60,8 +62,8 @@ func (a *App) runTUI(ctx context.Context) error {
 	if !a.interactive() {
 		return exitcode.Usagef("the interactive UI needs a terminal; use subcommands in agent mode (see `seventhings describe`)")
 	}
-	opts := []tea.ProgramOption{tea.WithInput(a.io.In), tea.WithOutput(a.io.Out)}
-	return tui.Run(ctx, tuiDeps{a}, opts, func(fn func(string)) { a.notify = fn })
+	opts := []tea.ProgramOption{tea.WithInput(a.io.In)}
+	return tui.Run(ctx, tuiDeps{a}, a.io.Out, opts, func(fn func(string)) { a.notify = fn })
 }
 
 func (a *App) uiCmd() *cobra.Command {
