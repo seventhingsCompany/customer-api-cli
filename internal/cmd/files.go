@@ -64,6 +64,7 @@ func (a *App) filesCmd() *cobra.Command {
 
 	download := func(use, short string, fn func(*client.Client, context.Context, string) ([]byte, error)) *cobra.Command {
 		var out string
+		var overwrite bool
 		d := &cobra.Command{
 			Use:   use + " <uuid> --out <path|->",
 			Short: short,
@@ -80,10 +81,10 @@ func (a *App) filesCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return a.writeBinary(data, out, map[string]any{"uuid": args[0]})
+				return a.writeBinary(data, out, overwrite, map[string]any{"uuid": args[0]})
 			},
 		}
-		addOutFlag(d, &out)
+		addOutFlag(d, &out, &overwrite)
 		return d
 	}
 
@@ -107,6 +108,7 @@ func (a *App) reportsCmd() *cobra.Command {
 	}
 
 	var tmpl, out string
+	var overwrite bool
 	var objects []string
 	create := &cobra.Command{
 		Use:     "create --template <uuid> --object <uuid>... --out <file.pdf|->",
@@ -128,12 +130,12 @@ func (a *App) reportsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.writeBinary(pdf, out, map[string]any{"template": tmpl, "objects": len(objects)})
+			return a.writeBinary(pdf, out, overwrite, map[string]any{"template": tmpl, "objects": len(objects)})
 		},
 	}
 	create.Flags().StringVar(&tmpl, "template", "", "report template UUID (see `reports templates`)")
 	create.Flags().StringSliceVar(&objects, "object", nil, "object UUID (repeatable or comma-separated)")
-	addOutFlag(create, &out)
+	addOutFlag(create, &out, &overwrite)
 
 	c.AddCommand(templates, create)
 	return c

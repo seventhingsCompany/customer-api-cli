@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,6 +15,8 @@ import (
 	"testing"
 
 	"github.com/SeventhingsCompany/customer-api-cli/internal/exitcode"
+	"github.com/SeventhingsCompany/customer-api-cli/internal/tui"
+	"github.com/spf13/cobra"
 )
 
 // fakeAPI is a minimal in-memory customer API.
@@ -429,5 +433,91 @@ func TestInteractiveTable(t *testing.T) {
 		func(k string) string { return env[k] }, BuildInfo{})
 	if code != exitcode.Usage || len(f.wrote()) != 0 || !strings.Contains(errBuf.String(), "[y/N]") {
 		t.Fatalf("exit %d writes %v: %s", code, f.wrote(), errBuf.String())
+	}
+}
+
+func TestTUISettings(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{"SEVENTHINGS_CONFIG_DIR": dir, "SEVENTHINGS_CREDENTIAL_STORE": "file"}
+	a := newApp(IO{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard}, func(k string) string { return env[k] }, BuildInfo{})
+	if err := a.setup(); err != nil {
+		t.Fatal(err)
+	}
+	d := tuiDeps{a}
+	if s := d.Settings(); s.PageSize != tui.DefaultPageSize || s.RateLimitSource != "default" || !strings.HasPrefix(s.Credentials, "file") {
+		t.Fatalf("defaults: %+v", s)
+	}
+	if _, err := a.httpBase(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetRateLimit(30); err != nil {
+		t.Fatal(err)
+	}
+	if a.baseHTTP != nil {
+		t.Error("rate limiter not rebuilt")
+	}
+	if err := d.SetPageSize(20); err != nil {
+		t.Fatal(err)
+	}
+	if s := d.Settings(); s.PageSize != 20 || s.RateLimit != 30 || s.RateLimitSource != "profile" {
+		t.Fatalf("after set: %+v", s)
+	}
+	r := run(t, env, "", "config", "list")
+	if !strings.Contains(r.out, `"page_size": 20`) || !strings.Contains(r.out, `"rate_limit": 30`) {
+		t.Fatalf("config list: %s %s", r.out, r.err)
+	}
+	r = run(t, env, "", "config", "set", "default", "--profile-page-size", "500")
+	if r.code != exitcode.Usage {
+		t.Fatalf("page size 500: exit %d", r.code)
+	}
+
+	env["SEVENTHINGS_RATE_LIMIT"] = "10"
+	if s := d.Settings(); s.RateLimit != 10 || s.RateLimitSource != "SEVENTHINGS_RATE_LIMIT" {
+		t.Fatalf("env override: %+v", s)
+	}
+	env["SEVENTHINGS_TOKEN"] = "tok"
+	if err := d.Logout(context.Background()); exitcode.For(err) != exitcode.Usage {
+		t.Fatalf("logout with env token: %v", err)
+	}
+}
+
+// TestClassifyCobraError pins the cobra and pflag messages classifyCobraError
+// matches, so a dependency upgrade that rewords them fails here instead of
+// silently turning usage errors into exit code 1.
+func TestClassifyCobraError(t *testing.T) {
+	newRoot := func() *cobra.Command {
+		root := &cobra.Command{Use: "root", SilenceErrors: true, SilenceUsage: true}
+		atLeast := &cobra.Command{Use: "atleast", Args: cobra.MinimumNArgs(1), RunE: func(*cobra.Command, []string) error { return nil }}
+		atLeast.Flags().Int("n", 0, "")
+		atLeast.Flags().String("req", "", "")
+		_ = atLeast.MarkFlagRequired("req")
+		exact := &cobra.Command{Use: "exact", Args: cobra.ExactArgs(1), RunE: func(*cobra.Command, []string) error { return nil }}
+		root.AddCommand(atLeast, exact)
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		return root
+	}
+	for phrase, args := range map[string][]string{
+		"unknown command":   {"nope"},
+		"unknown flag":      {"atleast", "a", "--req", "v", "--bogus"},
+		"unknown shorthand": {"atleast", "a", "--req", "v", "-Z"},
+		"required flag":     {"atleast", "a"},
+		"invalid argument":  {"atleast", "a", "--req", "v", "--n", "x"},
+		"accepts ":          {"exact"},
+		"requires ":         {"atleast", "--req", "v"},
+	} {
+		root := newRoot()
+		root.SetArgs(args)
+		err := root.Execute()
+		if err == nil || !strings.Contains(err.Error(), phrase) {
+			t.Errorf("%v: error %v does not contain %q", args, err, phrase)
+			continue
+		}
+		if _, ok := errors.AsType[*exitcode.UsageError](classifyCobraError(err)); !ok {
+			t.Errorf("%q not classified as a usage error", err)
+		}
+	}
+	if _, ok := errors.AsType[*exitcode.UsageError](classifyCobraError(errors.New("connection refused"))); ok {
+		t.Error("an unrelated error was classified as a usage error")
 	}
 }

@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/SeventhingsCompany/customer-api-cli/internal/auth"
-	"github.com/SeventhingsCompany/customer-api-cli/internal/config"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/exitcode"
 	"github.com/SeventhingsCompany/customer-api-go/client"
 	"github.com/SeventhingsCompany/customer-api-go/models"
@@ -122,7 +122,9 @@ func (a *App) saveLogin(name, url, clientID, username string, tok *models.TokenR
 	if err := a.credentialStore().Save(name, creds); err != nil {
 		return nil, fmt.Errorf("save credentials: %w", err)
 	}
-	a.cfg.Profiles[name] = &config.Profile{URL: url, ClientID: clientID, Username: username, RateLimit: prof.RateLimit}
+	updated := *prof
+	updated.URL, updated.ClientID, updated.Username = url, clientID, username
+	a.cfg.Profiles[name] = &updated
 	if a.cfg.CurrentProfile == "" {
 		a.cfg.CurrentProfile = name
 	}
@@ -177,20 +179,31 @@ func (a *App) authLogoutCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := a.profile()
-			if src := a.credentialSource(); strings.HasPrefix(src, "env:") {
-				return exitcode.Usagef("credentials come from the environment (%s); unset them instead of logging out", strings.TrimPrefix(src, "env:"))
-			}
-			revoked := false
-			if cl, err := a.Client(); err == nil {
-				revoked = cl.RevokeTokens(cmd.Context()) == nil
-			}
-			if err := a.credentialStore().Delete(name); err != nil {
+			revoked, err := a.logout(cmd.Context())
+			if err != nil {
 				return err
 			}
 			return a.done(fmt.Sprintf("Logged out (profile %q)", name), map[string]any{"profile": name, "revoked": revoked})
 		},
 	}
 	return write(annotate(c, annAuth, "none"))
+}
+
+// logout revokes the active profile's tokens on the server (best effort) and
+// deletes them locally.
+func (a *App) logout(ctx context.Context) (revoked bool, err error) {
+	name, _ := a.profile()
+	if src := a.credentialSource(); strings.HasPrefix(src, "env:") {
+		return false, exitcode.Usagef("credentials come from the environment (%s); unset them instead of logging out", strings.TrimPrefix(src, "env:"))
+	}
+	if cl, err := a.Client(); err == nil {
+		revoked = cl.RevokeTokens(ctx) == nil
+	}
+	if err := a.credentialStore().Delete(name); err != nil {
+		return revoked, err
+	}
+	a.client, a.session = nil, nil
+	return revoked, nil
 }
 
 func (a *App) authStatusCmd() *cobra.Command {

@@ -2,14 +2,16 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/SeventhingsCompany/customer-api-go/client"
 	"github.com/SeventhingsCompany/customer-api-go/models"
@@ -66,6 +68,7 @@ type editField struct {
 
 // recordForm edits a record; it knows how to turn answers into a body.
 type recordForm struct {
+	title  string
 	fields []*editField
 	form   *huh.Form
 }
@@ -95,7 +98,7 @@ func fieldsFromDefinitions(defs []models.FieldDefinition, tmpl models.AssetTrack
 			rest = append(rest, f)
 		}
 	}
-	fields := append(mandatory, rest...)
+	fields := slices.Concat(mandatory, rest)
 	for _, f := range fields {
 		f.orig = str(current[f.key])
 	}
@@ -124,11 +127,6 @@ func fieldsFromFixed(fixed []formField, current Item) []*editField {
 	return out
 }
 
-var (
-	dateRe     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-	datetimeRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?`)
-)
-
 func (f *editField) validate(s string) error {
 	s = strings.TrimSpace(s)
 	if f.check != nil && f.get != nil {
@@ -153,7 +151,7 @@ func (f *editField) validate(s string) error {
 			return fmt.Errorf("must be a number")
 		}
 	case models.FieldTypeDate:
-		if !dateRe.MatchString(s) {
+		if _, err := time.Parse(time.DateOnly, s); err != nil {
 			return fmt.Errorf("use YYYY-MM-DD")
 		}
 	case kindPath:
@@ -161,8 +159,15 @@ func (f *editField) validate(s string) error {
 			return fmt.Errorf("file not found")
 		}
 	case models.FieldTypeDatetime:
-		if !datetimeRe.MatchString(s) {
-			return fmt.Errorf("use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
+		valid := false
+		for _, layout := range []string{time.DateOnly, time.RFC3339, "2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02 15:04:05", "2006-01-02 15:04"} {
+			if _, err := time.Parse(layout, s); err == nil {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("use a valid YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS (optional timezone)")
 		}
 	}
 	return nil
@@ -190,20 +195,40 @@ func (f *editField) convert(s string) any {
 	return s
 }
 
-func newRecordForm(title string, fields []*editField, width int) *recordForm {
-	rf := &recordForm{fields: fields}
+func newRecordForm(title string, fields []*editField, width int, heights ...int) *recordForm {
+	height := 30
+	if len(heights) > 0 {
+		height = heights[0]
+	}
+	rf := &recordForm{title: title, fields: fields}
 	for _, f := range fields {
 		f.get = rf.value
 	}
 	var groups []*huh.Group
 	var cur []huh.Field
+	used, budget := 0, max(height-9, 4)
 	flush := func() {
 		if len(cur) > 0 {
 			groups = append(groups, huh.NewGroup(cur...))
 			cur = nil
+			used = 0
 		}
 	}
 	for _, f := range fields {
+		cost := 3
+		if f.kind == models.FieldTypeLongText {
+			cost = 5
+		} else if len(f.choices) > 6 || len(f.options) > 6 {
+			cost = 10
+		}
+		if len(cur) > 0 && used+cost > budget {
+			flush()
+		}
+		used += cost
+		initial := f.orig
+		if f.text != nil {
+			initial = *f.text
+		}
 		label := f.label
 		if f.required {
 			label += " *"
@@ -211,10 +236,13 @@ func newRecordForm(title string, fields []*editField, width int) *recordForm {
 		switch {
 		case f.kind == models.FieldTypeBoolean:
 			v := f.orig == "true"
+			if f.flag != nil {
+				v = *f.flag
+			}
 			f.flag = &v
 			cur = append(cur, huh.NewConfirm().Key(f.key).Title(label).Value(f.flag))
 		case len(f.choices) > 0:
-			v := f.orig
+			v := initial
 			f.text = &v
 			var opts []huh.Option[string]
 			if !f.required {
@@ -230,25 +258,28 @@ func newRecordForm(title string, fields []*editField, width int) *recordForm {
 			if v == "" && f.required {
 				v = f.choices[0][1]
 			}
-			sel := huh.NewSelect[string]().Key(f.key).Title(label).Options(opts...).Value(f.text)
+			sel := huh.NewSelect[string]().Key(f.key).Title(label).Options(opts...).Value(f.text).Validate(f.validate)
 			if len(opts) > 6 {
 				sel.Height(8).Description("↑↓ to scroll, / to filter")
 			}
 			cur = append(cur, sel)
 		case len(f.options) > 0:
-			v := f.orig
+			v := initial
 			f.text = &v
-			opts := []huh.Option[string]{huh.NewOption("(none)", "")}
+			var opts []huh.Option[string]
+			if !f.required {
+				opts = append(opts, huh.NewOption("(none)", ""))
+			}
 			for _, o := range f.options {
 				opts = append(opts, huh.NewOption(o, o))
 			}
-			cur = append(cur, huh.NewSelect[string]().Key(f.key).Title(label).Options(opts...).Value(f.text))
+			cur = append(cur, huh.NewSelect[string]().Key(f.key).Title(label).Options(opts...).Value(f.text).Validate(f.validate).Height(min(len(opts), 8)))
 		case f.kind == models.FieldTypeLongText:
-			v := f.orig
+			v := initial
 			f.text = &v
-			cur = append(cur, huh.NewText().Key(f.key).Title(label).Value(f.text).Lines(3))
+			cur = append(cur, huh.NewText().Key(f.key).Title(label).Value(f.text).Lines(3).Validate(f.validate))
 		default:
-			v := f.orig
+			v := initial
 			f.text = &v
 			field := f
 			in := huh.NewInput().Key(f.key).Title(label).Value(f.text).Validate(field.validate)
@@ -269,7 +300,7 @@ func newRecordForm(title string, fields []*editField, width int) *recordForm {
 			g.Title(title)
 		}
 	}
-	rf.form = huh.NewForm(groups...).WithWidth(width).WithShowHelp(true).WithTheme(formTheme)
+	rf.form = huh.NewForm(groups...).WithWidth(width).WithHeight(max(height-6, 5)).WithShowHelp(true).WithTheme(formTheme)
 	return rf
 }
 
@@ -361,12 +392,13 @@ func newLoginForm(url, clientID, username string, width int) *loginForm {
 
 // pathForm asks for a single file path (upload source or download target).
 type pathForm struct {
-	path string
-	form *huh.Form
+	path  string
+	title string
+	form  *huh.Form
 }
 
 func newPathForm(title, initial string, mustExist bool, width int) *pathForm {
-	pf := &pathForm{path: initial}
+	pf := &pathForm{title: title, path: initial}
 	pf.form = huh.NewForm(huh.NewGroup(
 		huh.NewInput().Title(title).Value(&pf.path).Validate(func(s string) error {
 			if strings.TrimSpace(s) == "" {
@@ -400,4 +432,271 @@ func uploadFile(ctx context.Context, cl *client.Client, path string) (string, er
 	}
 	defer func() { _ = f.Close() }()
 	return cl.FileUpload(ctx, filepath.Base(path), f)
+}
+
+func (m *Model) formWidth() int { return max(min(m.width-4, 90), 30) }
+
+func (m *Model) formHeight() int { return max(m.height-m.chrome(), 5) }
+
+func (m *Model) openLogin() {
+	_, url, clientID, username := m.deps.Profile()
+	m.openLoginWith(url, clientID, username)
+}
+
+func (m *Model) openLoginWith(url, clientID, username string) {
+	m.login = newLoginForm(url, clientID, username, m.formWidth())
+	m.form = m.login.form.WithHeight(m.formHeight())
+	m.formKind = formLogin
+	m.mode = modeLogin
+}
+
+func (m *Model) openPathForm(kind formKind, title, initial string, mustExist bool) {
+	m.navigate()
+	m.path = newPathForm(title, initial, mustExist, m.formWidth())
+	m.form = m.path.form.WithHeight(m.formHeight())
+	m.formKind = kind
+	if m.mode != modeForm {
+		m.prev = m.mode
+	}
+	m.mode = modeForm
+}
+
+func (m *Model) startCreate() tea.Cmd {
+	m.navigate()
+	m.prev = m.mode
+	return m.prepareRecordForm(nil)
+}
+
+func (m *Model) startEdit(it Item) tea.Cmd {
+	m.navigate()
+	return m.prepareRecordForm(it)
+}
+
+// withDefs runs next once the field definitions of tmpl are loaded.
+func (m *Model) withDefs(tmpl models.AssetTrackingTemplate, next func() tea.Cmd) tea.Cmd {
+	if _, ok := m.defs[tmpl]; ok || tmpl == "" {
+		return next()
+	}
+	return m.prepare(func(ctx context.Context, cl *client.Client) tea.Msg {
+		defs, err := cl.FieldDefinitionsList(ctx, tmpl)
+		return defsMsg{template: tmpl, defs: defs, err: err, next: next}
+	})
+}
+
+// withChoices loads the picker options fields need, then runs next.
+func (m *Model) withChoices(fields []*editField, next func() tea.Cmd) tea.Cmd {
+	var need []choiceSource
+	for _, f := range fields {
+		if _, cached := m.choiceCache[f.source]; f.source != "" && !cached && !slices.Contains(need, f.source) {
+			need = append(need, f.source)
+		}
+	}
+	if len(need) == 0 {
+		return next()
+	}
+	return m.prepare(func(ctx context.Context, cl *client.Client) tea.Msg {
+		loaded := map[choiceSource][][2]string{}
+		for _, src := range need {
+			c, err := loadChoices(ctx, cl, src)
+			switch {
+			case errors.Is(err, errTooManyChoices):
+				loaded[src] = nil // fall back to typing the ID
+			case err != nil:
+				return choicesMsg{err: fmt.Errorf("load %s: %w", src, err)}
+			default:
+				loaded[src] = c
+			}
+		}
+		return choicesMsg{loaded: loaded, next: next}
+	})
+}
+
+// applyChoices attaches cached picker options to fields.
+func (m *Model) applyChoices(fields []*editField) error {
+	for _, f := range fields {
+		if f.source == "" {
+			continue
+		}
+		f.choices = m.choiceCache[f.source]
+		if len(f.choices) == 0 && f.required && f.kind != models.FieldTypeLinkedUser &&
+			f.kind != models.FieldTypeLinkedPerson && f.kind != models.FieldTypeLinkedLocation && f.kind != models.FieldTypeLinkedRoom {
+			return fmt.Errorf("no %s available for %s", f.source, f.label)
+		}
+	}
+	return nil
+}
+
+func (m *Model) buildFields(r *resource, edit Item) []*editField {
+	var fields []*editField
+	if r.template != "" {
+		fields = fieldsFromDefinitions(m.defs[r.template], r.template, edit, m.allFields)
+	} else {
+		fields = fieldsFromFixed(r.fixed, edit)
+	}
+	if edit == nil {
+		for _, f := range fields {
+			if v, ok := m.prefill[f.key]; ok {
+				f.orig = v
+			}
+		}
+	}
+	return fields
+}
+
+// prepareRecordForm loads field definitions and picker options, then opens
+// the create (edit == nil) or edit form.
+func (m *Model) prepareRecordForm(edit Item) tea.Cmd {
+	r := m.res[m.tab]
+	return m.withDefs(r.template, func() tea.Cmd {
+		fields := m.buildFields(r, edit)
+		return m.withChoices(fields, func() tea.Cmd { return m.openRecordForm(edit) })
+	})
+}
+
+func (m *Model) openRecordForm(edit Item) tea.Cmd {
+	r := m.res[m.tab]
+	fields := m.buildFields(r, edit)
+	m.prefill = nil
+	if err := m.applyChoices(fields); err != nil {
+		m.mode = m.prev
+		return m.fail(err)
+	}
+	title := "New " + r.singular
+	m.formKind = formCreate
+	if edit != nil {
+		title = fmt.Sprintf("Edit %s %q", r.singular, displayName(edit, r.id(edit)))
+		m.formKind = formEdit
+	}
+	m.formTarget = edit
+	m.record = newRecordForm(title, fields, m.formWidth(), m.height)
+	m.form = m.record.form
+	m.mode = modeForm
+	return m.form.Init()
+}
+
+// openCustomForm shows an action form; submit receives the answers.
+func (m *Model) openCustomForm(title string, fields []*editField, submit func(rf *recordForm) tea.Cmd) tea.Cmd {
+	return m.withChoices(fields, func() tea.Cmd {
+		if err := m.applyChoices(fields); err != nil {
+			return m.fail(err)
+		}
+		if m.mode != modeForm {
+			m.prev = m.mode
+		}
+		m.record = newRecordForm(title, fields, m.formWidth(), m.height)
+		m.form = m.record.form
+		m.formKind = formCustom
+		m.custom = submit
+		m.mode = modeForm
+		return m.form.Init()
+	})
+}
+
+// ask shows a y/N confirmation and runs cmd on "y".
+func (m *Model) ask(prompt string, cmd func() tea.Cmd) {
+	// A confirmation replaces the current view, but a submitted custom form
+	// still needs its recovery snapshot if the confirmed operation fails.
+	recovery := m.recovery
+	m.navigate()
+	m.recovery = recovery
+	if m.mode != modeConfirm {
+		m.prev = m.mode
+	}
+	m.mode = modeConfirm
+	m.confirmPrompt = prompt
+	m.confirmCmd = cmd
+}
+
+func (m *Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.form == nil {
+		return m, nil
+	}
+	fm, cmd := m.form.Update(msg)
+	if f, ok := fm.(*huh.Form); ok {
+		m.form = f
+	}
+	switch m.form.State {
+	case huh.StateAborted:
+		if m.mode == modeLogin {
+			return m, tea.Quit
+		}
+		m.navigate()
+		m.form = nil
+		m.mode = m.prev
+		m.setStatus("Cancelled", false)
+		return m, nil
+	case huh.StateCompleted:
+		return m, m.submitForm()
+	}
+	return m, cmd
+}
+
+func (m *Model) submitForm() tea.Cmd {
+	r := m.res[m.tab]
+	kind := m.formKind
+	if kind == formCreate || kind == formEdit || kind == formCustom {
+		for _, f := range m.record.fields {
+			if f.text != nil {
+				if err := f.validate(*f.text); err != nil {
+					return m.fail(err)
+				}
+			}
+		}
+	}
+	if kind == formCreate || kind == formEdit || kind == formUpload || kind == formDownload || kind == formCustom {
+		m.rememberForm()
+	}
+	m.form = nil
+	if kind != formLogin {
+		m.mode = m.prev
+	}
+	switch kind {
+	case formLogin:
+		m.operation = "Logging in…"
+		lf := m.login
+		return m.async(0, func() tea.Msg {
+			return loginMsg{err: m.deps.Login(m.ctx, strings.TrimSpace(lf.url), strings.TrimSpace(lf.clientID), strings.TrimSpace(lf.username), lf.password)}
+		})
+	case formCreate:
+		m.operation = "Creating " + r.singular + "…"
+		body := m.record.body(false)
+		return m.run(func(ctx context.Context, cl *client.Client) tea.Msg {
+			id, err := r.create(ctx, cl, body)
+			return doneMsg{text: fmt.Sprintf("Created %s %s", r.singular, id), err: err, reload: true}
+		})
+	case formEdit:
+		m.operation = "Saving " + r.singular + "…"
+		body := m.record.body(true)
+		if len(body) == 0 {
+			m.recovery, m.operation = nil, ""
+			m.setStatus("No changes", false)
+			return nil
+		}
+		id := r.id(m.formTarget)
+		return m.run(func(ctx context.Context, cl *client.Client) tea.Msg {
+			err := r.update(ctx, cl, id, body)
+			return doneMsg{text: fmt.Sprintf("Updated %s (%d field(s))", r.singular, len(body)), err: err, reload: true}
+		})
+	case formUpload:
+		m.operation = "Uploading file…"
+		path := m.path.path
+		return m.run(func(ctx context.Context, cl *client.Client) tea.Msg {
+			id, err := r.upload(ctx, cl, path)
+			return doneMsg{text: fmt.Sprintf("Uploaded %s as %s", filepath.Base(path), id), err: err, reload: true}
+		})
+	case formCustom:
+		return m.custom(m.record)
+	case formPageSize, formRateLimit:
+		m.submitSetting(kind)
+		return nil
+	case formFilter:
+		return m.applyFilter()
+	case formProfile:
+		return m.submitProfile()
+	case formDownload:
+		path := expandHome(m.path.path)
+		id := r.id(m.formTarget)
+		return m.confirmDownload(path, id)
+	}
+	return nil
 }

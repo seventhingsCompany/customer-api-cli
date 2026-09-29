@@ -144,6 +144,7 @@ type fakeDeps struct {
 	loggedIn bool
 	mu       sync.Mutex
 	login    []string
+	settings Settings
 }
 
 func (d *fakeDeps) Client() (*client.Client, error) { return client.NewWithToken(d.url, "tok"), nil }
@@ -161,6 +162,42 @@ func (d *fakeDeps) Login(_ context.Context, url, clientID, username, password st
 }
 func (d *fakeDeps) Profile() (string, string, string, string) { return "test", d.url, "cid", "me" }
 func (d *fakeDeps) Env(key string) string                     { return d.env[key] }
+func (d *fakeDeps) Settings() Settings {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	s := d.settings
+	if s.PageSize == 0 {
+		s.PageSize = DefaultPageSize
+	}
+	if s.RateLimitSource == "" {
+		s.RateLimit, s.RateLimitSource = 200, "default"
+	}
+	if s.Credentials == "" {
+		s.Credentials = "file"
+	}
+	return s
+}
+func (d *fakeDeps) SetRateLimit(n int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.settings.RateLimit, d.settings.RateLimitSource = n, "profile"
+	return nil
+}
+func (d *fakeDeps) SetPageSize(n int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.settings.PageSize = n
+	return nil
+}
+func (d *fakeDeps) Logout(context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.loggedIn = false
+	return nil
+}
+
+func (d *fakeDeps) Profiles() []string         { return []string{"test"} }
+func (d *fakeDeps) SwitchProfile(string) error { return nil }
 
 // driver runs the model synchronously: it feeds messages to Update and
 // executes the returned commands, so tests can assert on the rendered view.
@@ -232,6 +269,10 @@ func (d *driver) key(keys ...string) {
 			d.send(tea.KeyPressMsg{Code: tea.KeyUp})
 		case "tab":
 			d.send(tea.KeyPressMsg{Code: tea.KeyTab})
+		case "left":
+			d.send(tea.KeyPressMsg{Code: tea.KeyLeft})
+		case "backspace":
+			d.send(tea.KeyPressMsg{Code: tea.KeyBackspace})
 		default:
 			for _, c := range k {
 				d.send(tea.KeyPressMsg{Code: c, Text: string(c)})
@@ -289,8 +330,8 @@ func TestTabSwitch(t *testing.T) {
 func TestSearchUsesServerFilter(t *testing.T) {
 	f := newFakeAPI(t)
 	d := newDriver(t, &fakeDeps{url: f.srv.URL, loggedIn: true})
-	d.key("/", "Desk", "enter")
-	d.expect(`filter: "Desk"`, "1 objects")
+	d.key("s", "Desk", "enter")
+	d.expect(`search: "Desk"`, "1 objects")
 	if !f.called("GET objects?page=1&per_page=50&filter[inventory_name][like][]=Desk") {
 		t.Errorf("no filtered request: %v", f.calls)
 	}
@@ -338,8 +379,8 @@ func TestTaskToggle(t *testing.T) {
 	f := newFakeAPI(t)
 	d := newDriver(t, &fakeDeps{url: f.srv.URL, loggedIn: true})
 	d.key("6")
-	d.expect("Check extinguisher", "open", "s open/close")
-	d.key("s")
+	d.expect("Check extinguisher", "open", "c open/close")
+	d.key("c")
 	d.expect("Task is now closed", "closed")
 	if !f.called(`PUT task-management/task/t1/status? {"status":"closed"}`) {
 		t.Errorf("calls: %v", f.calls)
