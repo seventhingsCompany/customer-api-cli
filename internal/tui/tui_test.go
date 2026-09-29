@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,8 @@ type fakeAPI struct {
 	tasks map[string]string // uuid → status
 	// defsExtra is appended to the asset field definitions.
 	defsExtra []models.FieldDefinition
+	// extra routes ("METHOD path") take precedence over the built-in ones.
+	extra map[string]http.HandlerFunc
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -47,6 +50,10 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 		f.calls = append(f.calls, r.Method+" "+path+"?"+r.URL.RawQuery+" "+string(body))
 		f.mu.Unlock()
 		enc := json.NewEncoder(w)
+		if h, ok := f.extra[r.Method+" "+path]; ok {
+			h(w, r)
+			return
+		}
 		switch {
 		case r.Method == "GET" && path == "objects":
 			items := objects
@@ -132,6 +139,7 @@ func (f *fakeAPI) called(prefix string) bool {
 }
 
 type fakeDeps struct {
+	env      map[string]string
 	url      string
 	loggedIn bool
 	mu       sync.Mutex
@@ -152,12 +160,14 @@ func (d *fakeDeps) Login(_ context.Context, url, clientID, username, password st
 	return nil
 }
 func (d *fakeDeps) Profile() (string, string, string, string) { return "test", d.url, "cid", "me" }
+func (d *fakeDeps) Env(key string) string                     { return d.env[key] }
 
 // driver runs the model synchronously: it feeds messages to Update and
 // executes the returned commands, so tests can assert on the rendered view.
 type driver struct {
-	t *testing.T
-	m *Model
+	t   *testing.T
+	m   *Model
+	raw []string // escape sequences sent with tea.Raw
 }
 
 func newDriver(t *testing.T, deps Deps) *driver {
@@ -195,6 +205,9 @@ func (d *driver) exec(cmd tea.Cmd) {
 		}
 		return
 	case tea.QuitMsg:
+		return
+	case tea.RawMsg:
+		d.raw = append(d.raw, fmt.Sprint(msg.Msg))
 		return
 	}
 	if v := reflect.ValueOf(msg); v.Kind() == reflect.Slice && v.Type().Elem() == reflect.TypeFor[tea.Cmd]() {

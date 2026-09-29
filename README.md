@@ -63,6 +63,7 @@ For CI and agents, credentials can come from the environment instead:
 | `SEVENTHINGS_PROFILE` | Profile name |
 | `SEVENTHINGS_MODE` | `agent` or `interactive` |
 | `SEVENTHINGS_RATE_LIMIT` | Requests per minute (default 200, `0` disables) |
+| `SEVENTHINGS_IMAGES` | Picture rendering in the UI: `auto`, `kitty`, `iterm2`, `sixel`, `blocks`, `off` |
 
 ## Commands
 
@@ -128,12 +129,13 @@ The API allows 200 requests per minute by default. The CLI enforces this client-
 
 `seventhings` (or `seventhings ui`) opens a full-screen UI with a tab for each resource:
 - **Browse:** search with `/`, page with `[` and `]`, `enter` opens details, `h` shows history.
-- **Edit:** create with `n` and edit with `e`. Forms are built from the tenant's field definitions and include pickers for linked records. Delete with `d`, which always asks first.
-- **Resource actions:**
-  - objects: `a`/`x` attach or remove a file, `t` creates a task, `o` offers the object on the circularity hub
-  - tasks: `s` opens or closes a task
-  - files: `D` downloads a file
-  - hub items: `o` creates an order
+- **Pictures:** details show the record's picture, and the Files tab previews images. `p` hides or shows them. `O` opens the file (any type) in your system's default viewer; over SSH, use `D` to download it instead. The best supported format is detected automatically:
+  - full resolution with the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (kitty, Ghostty, WezTerm)
+  - full resolution with iTerm2 inline images (iTerm2, and VS Code with `terminal.integrated.enableImages` turned on)
+  - full resolution with Sixel (Windows Terminal, Konsole, foot, xterm)
+  - colored half-block characters everywhere else, including tmux, macOS Terminal and Alacritty
+
+  Set `SEVENTHINGS_IMAGES` to `kitty`, `iterm2`, `sixel`, `blocks` or `off` to override the detection (default `auto`).
 
 Press `?` for all keys.
 

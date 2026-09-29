@@ -10,26 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-var (
-	accent      = lipgloss.Color("#7D56F4")
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(accent).Padding(0, 1)
-	tabStyle    = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("245"))
-	activeTab   = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(accent).Underline(true)
-	keyStyle    = lipgloss.NewStyle().Foreground(accent).Bold(true)
-	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
-	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	promptStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
-	boxStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1)
-)
-
-func tableStyles() table.Styles {
-	s := table.DefaultStyles()
-	s.Header = s.Header.BorderStyle(lipgloss.NormalBorder()).BorderBottom(true).BorderForeground(lipgloss.Color("240")).Bold(true)
-	s.Selected = s.Selected.Foreground(lipgloss.Color("#FFFFFF")).Background(accent).Bold(false)
-	return s
-}
-
 // chrome is the number of lines used by header, tabs, search and footer.
 func (m *Model) chrome() int {
 	n := 5
@@ -44,7 +24,7 @@ func (m *Model) layout() {
 	m.table.SetWidth(m.width)
 	m.table.SetHeight(bodyH)
 	m.detail.SetWidth(m.width)
-	m.detail.SetHeight(bodyH)
+	m.detail.SetHeight(max(bodyH-1, 2)) // detail and history add a title line
 	m.search.SetWidth(max(m.width-4, 10))
 	m.refreshTable()
 }
@@ -121,16 +101,10 @@ func (m *Model) render() string {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "", m.footer())
 	}
 
-	var tabs []string
-	for i, r := range m.res {
-		label := fmt.Sprintf("%d %s", (i+1)%10, r.title)
-		if i == m.tab {
-			tabs = append(tabs, activeTab.Render(label))
-		} else {
-			tabs = append(tabs, tabStyle.Render(label))
-		}
+	tabBar := m.tabBar(false)
+	if lipgloss.Width(tabBar) > m.width {
+		tabBar = m.tabBar(true) // narrow terminal: numbers, active title only
 	}
-	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 
 	var body string
 	switch m.mode {
@@ -142,7 +116,7 @@ func (m *Model) render() string {
 		body = boxStyle.Render(promptStyle.Render(m.confirmPrompt))
 	case modeDetail:
 		r := m.res[m.tab]
-		body = keyStyle.Render(displayName(m.detailItem, r.id(m.detailItem))) + "\n" + m.detail.View()
+		body = keyStyle.Render(displayName(m.detailItem, r.id(m.detailItem))) + "\n" + m.detailBody()
 	case modeHistory:
 		body = keyStyle.Render("History: "+displayName(m.detailOrSelected(), "")) + "\n" + m.detail.View()
 	default:
@@ -159,7 +133,24 @@ func (m *Model) render() string {
 	default:
 		searchLine = dimStyle.Render(fmt.Sprintf("page %d", st.page))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, header, tabBar, searchLine, body, m.footer())
+	out := lipgloss.JoinVertical(lipgloss.Left, header, tabBar, searchLine, body, m.footer())
+	return lipgloss.NewStyle().MaxWidth(m.width).Render(out)
+}
+
+func (m *Model) tabBar(compact bool) string {
+	var tabs []string
+	for i, r := range m.res {
+		label := fmt.Sprintf("%d %s", (i+1)%10, r.title)
+		if compact && i != m.tab {
+			label = fmt.Sprint((i + 1) % 10)
+		}
+		if i == m.tab {
+			tabs = append(tabs, activeTab.Render(label))
+		} else {
+			tabs = append(tabs, tabStyle.Render(label))
+		}
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 }
 
 func (m *Model) detailOrSelected() Item {
@@ -187,7 +178,7 @@ func (m *Model) footer() string {
 	if m.showHelp && m.mode == modeList {
 		out += "\n" + dimStyle.Render("tab/1-0 switch · ↑↓ move · [ ] page · / search · esc clear · r reload\n"+
 			"enter details · n new · e edit (N/E: all fields) · d delete · h history · t new task for object\n"+
-			"a/x attach/detach file · o offer on hub / order hub item · s open/close task · D download file · q quit")
+			"a/x attach/detach file · O open file in viewer · o offer on hub / order hub item · s open/close task · D download file · q quit")
 	}
 	return out
 }
@@ -206,6 +197,12 @@ func (m *Model) keyHelp() string {
 		return "↑↓ scroll · esc back"
 	case modeDetail:
 		keys = append(keys, "↑↓ scroll", "esc back")
+		if u, _ := pictureFile(m.detailItem); u != "" {
+			keys = append(keys, "p picture")
+		}
+		if u, _ := firstAttachment(m.detailItem); u != "" || r.download != nil {
+			keys = append(keys, "O open")
+		}
 	default:
 		keys = append(keys, "enter open", "/ search")
 		if r.create != nil || r.upload != nil {
