@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -25,6 +26,9 @@ type column struct {
 type query struct {
 	page, perPage int
 	search        string
+	searchKey     string // field for a server-side search (resource.searchKey)
+	filters       []models.FilterEntry
+	sorts         []sortKey
 }
 
 // formField is a field in a fixed (non-template) form.
@@ -75,15 +79,28 @@ func resolveObjectRefs(ctx context.Context, cl *client.Client, body Item) error 
 type resource struct {
 	title    string
 	singular string
-	idKey    string // key holding the ID used by get/update/delete
-	columns  []column
+	cli      string // CLI command group, e.g. "rental-cases" or "hub items"
+	// searchKey is the field a search matches on the server (like);
+	// resources without one search client-side.
+	searchKey string
+	idKey     string // key holding the ID used by get/update/delete
+	columns   []column
 
 	// template drives create/edit forms from field definitions; fixed is
 	// used when a resource has no template.
 	template models.AssetTrackingTemplate
 	fixed    []formField
 
-	load    func(ctx context.Context, cl *client.Client, q query) ([]Item, error)
+	// filterable resources take the CLI's filter syntax (key f); sort is
+	// how they can be sorted, sortFields limits the fields.
+	filterable bool
+	sort       sortMode
+	sortFields []string
+
+	// load returns one page and the total number of matching records, or
+	// noTotal when only count (if set) can tell.
+	load    func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error)
+	count   func(ctx context.Context, cl *client.Client, q query) (int, error)
 	get     func(ctx context.Context, cl *client.Client, id string) (Item, error)
 	create  func(ctx context.Context, cl *client.Client, body Item) (string, error)
 	update  func(ctx context.Context, cl *client.Client, id string, body Item) error
@@ -160,33 +177,67 @@ func str(v any) string {
 }
 
 // serverSearch returns list options with a like filter on key.
-func serverSearch(q query, key string) *models.ListOptions {
+// Zero page and perPage (as count uses) are left out of the query.
+func serverSearch(q query) *models.ListOptions {
 	o := models.NewListOptions().WithPage(q.page).WithPerPage(q.perPage)
 	if q.search != "" {
-		o.Where(models.Like(key, q.search))
+		o.Where(models.Like(q.searchKey, q.search))
+	}
+	for _, f := range q.filters {
+		o.Where(f)
+	}
+	for _, s := range q.sorts {
+		o.SortBy(s.field, s.dir)
 	}
 	return o
 }
 
-// clientPage filters all items by search (any value contains it,
-// case-insensitive) and returns the requested page.
-func clientPage(all []Item, q query) []Item {
-	if q.search != "" {
-		needle := strings.ToLower(q.search)
+// noTotal marks a page whose total number of records is unknown.
+const noTotal = -1
+
+// withoutTotal adapts list calls that do not report a total.
+func withoutTotal(items []Item, err error) ([]Item, int, error) {
+	return items, noTotal, err
+}
+
+// clientPage filters all items by search and returns the requested page
+// and the number of matches.
+// Every word of the search must appear in some value (case-insensitive),
+// so "Henry Rausch" finds a first and a last name in separate fields.
+func clientPage(all []Item, q query) ([]Item, int) {
+	if words := strings.Fields(strings.ToLower(q.search)); len(words) > 0 {
 		var hits []Item
 		for _, it := range all {
+			var text strings.Builder
 			for _, v := range it {
-				if strings.Contains(strings.ToLower(str(v)), needle) {
-					hits = append(hits, it)
-					break
-				}
+				text.WriteString(strings.ToLower(str(v)) + "\n")
+			}
+			if !slices.ContainsFunc(words, func(w string) bool { return !strings.Contains(text.String(), w) }) {
+				hits = append(hits, it)
 			}
 		}
 		all = hits
 	}
 	start := min((q.page-1)*q.perPage, len(all))
 	end := min(start+q.perPage, len(all))
-	return all[start:end]
+	return all[start:end], len(all)
+}
+
+// personOptions and userOptions carry the sort of q (one field at most).
+func personOptions(q query) *models.PersonListOptions {
+	o := models.NewPersonListOptions()
+	if len(q.sorts) > 0 {
+		o.WithSort(q.sorts[0].field, q.sorts[0].order())
+	}
+	return o
+}
+
+func userOptions(q query) *models.UserListOptions {
+	o := models.NewUserListOptions()
+	if len(q.sorts) > 0 {
+		o.WithSort(models.UserSortBy(q.sorts[0].field), q.sorts[0].order())
+	}
+	return o
 }
 
 func atoi(id string) (int, error) {
@@ -208,11 +259,13 @@ func personItem(p *models.Person) Item {
 func resources() []*resource {
 	return []*resource{
 		{
-			title: "Objects", singular: "object", idKey: "asset_uuid", template: models.AssetTrackingTemplateAsset,
+			title: "Objects", cli: "objects", searchKey: "inventory_name", filterable: true, sort: sortMany, singular: "object", idKey: "asset_uuid", template: models.AssetTrackingTemplateAsset,
 			columns: []column{{"Name", "inventory_name", 4}, {"Barcode", "barcode", 3}, {"Group", "inventory_group", 2}, {"Updated", "updated_at", 3}},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
-				items, err := cl.ObjectsList(ctx, serverSearch(q, "inventory_name"))
-				return items, err
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
+				return withoutTotal(cl.ObjectsList(ctx, serverSearch(q)))
+			},
+			count: func(ctx context.Context, cl *client.Client, q query) (int, error) {
+				return cl.ObjectsCount(ctx, serverSearch(q))
 			},
 			get:    func(ctx context.Context, cl *client.Client, id string) (Item, error) { return cl.ObjectGet(ctx, id) },
 			create: func(ctx context.Context, cl *client.Client, b Item) (string, error) { return cl.ObjectCreate(ctx, b) },
@@ -232,10 +285,13 @@ func resources() []*resource {
 			hubOffer: true,
 		},
 		{
-			title: "Rooms", singular: "room", idKey: "uuid", template: models.AssetTrackingTemplateRoom,
+			title: "Rooms", cli: "rooms", searchKey: "name", filterable: true, sort: sortMany, singular: "room", idKey: "uuid", template: models.AssetTrackingTemplateRoom,
 			columns: []column{{"Name", "name", 4}, {"Number", "number", 2}, {"Location ID", "building_id", 2}, {"Updated", "updated_at", 3}},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
-				return cl.RoomsList(ctx, serverSearch(q, "name"))
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
+				return withoutTotal(cl.RoomsList(ctx, serverSearch(q)))
+			},
+			count: func(ctx context.Context, cl *client.Client, q query) (int, error) {
+				return cl.RoomsCount(ctx, serverSearch(q))
 			},
 			get:    func(ctx context.Context, cl *client.Client, id string) (Item, error) { return cl.RoomGet(ctx, id) },
 			create: func(ctx context.Context, cl *client.Client, b Item) (string, error) { return cl.RoomCreate(ctx, b) },
@@ -249,7 +305,7 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Locations", singular: "location", idKey: "uuid",
+			title: "Locations", cli: "locations", searchKey: "name", filterable: true, sort: sortMany, singular: "location", idKey: "uuid",
 			columns: []column{{"Name", "name", 4}, {"ID", "id", 1}, {"City", "city", 3}, {"Address", "address", 4}, {"Country", "country", 2}},
 			fixed: []formField{
 				{key: "name", label: "Name", required: true, kind: models.FieldTypeText},
@@ -258,8 +314,11 @@ func resources() []*resource {
 				{key: "city", label: "City", kind: models.FieldTypeText},
 				{key: "country", label: "Country", kind: models.FieldTypeText},
 			},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
-				return cl.LocationsList(ctx, serverSearch(q, "name"))
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
+				return withoutTotal(cl.LocationsList(ctx, serverSearch(q)))
+			},
+			count: func(ctx context.Context, cl *client.Client, q query) (int, error) {
+				return cl.LocationsCount(ctx, serverSearch(q))
 			},
 			get:    func(ctx context.Context, cl *client.Client, id string) (Item, error) { return cl.LocationGet(ctx, id) },
 			create: func(ctx context.Context, cl *client.Client, b Item) (string, error) { return cl.LocationCreate(ctx, b) },
@@ -273,28 +332,29 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Persons", singular: "person", idKey: "person_uuid", template: models.AssetTrackingTemplatePerson,
+			title: "Persons", cli: "persons", sort: sortOne, singular: "person", idKey: "person_uuid", template: models.AssetTrackingTemplatePerson,
 			columns: []column{{"First name", "first_name", 3}, {"Last name", "last_name", 3}, {"E-mail", "email", 5}, {"Department", "department", 3}},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
 				if q.search != "" { // no server-side search: scan everything
 					var all []Item
-					for p, err := range cl.PersonsAll(ctx, nil) {
+					for p, err := range cl.PersonsAll(ctx, personOptions(q)) {
 						if err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 						all = append(all, personItem(&p))
 					}
-					return clientPage(all, q), nil
+					items, total := clientPage(all, q)
+					return items, total, nil
 				}
-				res, err := cl.PersonsList(ctx, models.NewPersonListOptions().WithPage(q.page).WithPerPage(q.perPage))
+				res, err := cl.PersonsList(ctx, personOptions(q).WithPage(q.page).WithPerPage(q.perPage))
 				if err != nil {
-					return nil, err
+					return nil, 0, err
 				}
 				out := make([]Item, len(res.Items))
 				for i := range res.Items {
 					out[i] = personItem(&res.Items[i])
 				}
-				return out, nil
+				return out, res.Total, nil
 			},
 			get: func(ctx context.Context, cl *client.Client, id string) (Item, error) {
 				p, err := cl.PersonGet(ctx, id)
@@ -313,25 +373,27 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Users", singular: "user", idKey: "uuid",
+			title: "Users", cli: "users", sort: sortOne, sortFields: []string{"id", "email"}, singular: "user", idKey: "uuid",
 			columns: []column{{"Display name", "display_name", 4}, {"E-mail", "email", 5}, {"ID", "id", 1}},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
 				if q.search != "" {
 					var all []Item
-					for u, err := range cl.UsersAll(ctx, nil) {
+					for u, err := range cl.UsersAll(ctx, userOptions(q)) {
 						if err != nil {
-							return nil, err
+							return nil, 0, err
 						}
 						it, _ := toItem(u)
 						all = append(all, it)
 					}
-					return clientPage(all, q), nil
+					items, total := clientPage(all, q)
+					return items, total, nil
 				}
-				res, err := cl.UsersList(ctx, models.NewUserListOptions().WithPage(q.page).WithPerPage(q.perPage))
+				res, err := cl.UsersList(ctx, userOptions(q).WithPage(q.page).WithPerPage(q.perPage))
 				if err != nil {
-					return nil, err
+					return nil, 0, err
 				}
-				return toItems(res.Items)
+				items, err := toItems(res.Items)
+				return items, res.Total, err
 			},
 			get: func(ctx context.Context, cl *client.Client, id string) (Item, error) {
 				u, err := cl.UserGet(ctx, id)
@@ -342,7 +404,7 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Tasks", singular: "task", idKey: "uuid",
+			title: "Tasks", cli: "tasks", singular: "task", idKey: "uuid",
 			columns: []column{{"Title", "title", 5}, {"Status", "status", 1}, {"Deadline", "deadline", 2}, {"Updated", "updated_at", 3}},
 			fixed: []formField{
 				{key: "title", label: "Title", required: true, kind: models.FieldTypeText},
@@ -351,13 +413,14 @@ func resources() []*resource {
 				{key: "deadline", label: "Deadline (YYYY-MM-DD)", required: true, kind: models.FieldTypeDate},
 				{key: "comment", label: "Comment", kind: models.FieldTypeLongText},
 			},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
 				tasks, err := cl.TasksList(ctx, nil) // not paginated by the API
 				if err != nil {
-					return nil, err
+					return nil, 0, err
 				}
 				all, err := toItems(tasks)
-				return clientPage(all, q), err
+				items, total := clientPage(all, q)
+				return items, total, err
 			},
 			get: func(ctx context.Context, cl *client.Client, id string) (Item, error) {
 				t, err := cl.TaskGet(ctx, id)
@@ -401,7 +464,7 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Rentals", singular: "rental case", idKey: "uuid",
+			title: "Rentals", cli: "rental-cases", searchKey: "title", filterable: true, sort: sortMany, singular: "rental case", idKey: "uuid",
 			columns: []column{{"Title", "title", 5}, {"Status", "status", 2}, {"Issue", "issue_date", 2}, {"Due", "due_date", 2}},
 			// The API requires every field except the comment.
 			fixed: []formField{
@@ -444,12 +507,12 @@ func resources() []*resource {
 				}
 				return cl.RentalCaseCreate(ctx, in)
 			},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
-				cases, err := cl.RentalCasesList(ctx, serverSearch(q, "title"))
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
+				cases, err := cl.RentalCasesList(ctx, serverSearch(q))
 				if err != nil {
-					return nil, err
+					return nil, 0, err
 				}
-				return toItems(cases)
+				return withoutTotal(toItems(cases))
 			},
 			get: func(ctx context.Context, cl *client.Client, id string) (Item, error) {
 				rc, err := cl.RentalCaseGet(ctx, id)
@@ -475,15 +538,16 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Files", singular: "file", idKey: "uuid",
+			title: "Files", cli: "files", singular: "file", idKey: "uuid",
 			columns: []column{{"Name", "name", 5}, {"Type", "type", 2}, {"Size", "size", 1}, {"Created", "created_at", 3}},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
 				files, err := cl.FilesList(ctx)
 				if err != nil {
-					return nil, err
+					return nil, 0, err
 				}
 				all, err := toItems(files)
-				return clientPage(all, q), err
+				items, total := clientPage(all, q)
+				return items, total, err
 			},
 			get: func(ctx context.Context, cl *client.Client, id string) (Item, error) {
 				f, err := cl.FileGet(ctx, id)
@@ -498,11 +562,11 @@ func resources() []*resource {
 			upload: uploadFile,
 		},
 		{
-			title: "Hub items", singular: "hub item", idKey: "id", hubOrder: true,
+			title: "Hub items", cli: "hub items", searchKey: "name", filterable: true, sort: sortMany, singular: "hub item", idKey: "id", hubOrder: true,
 			columns: []column{{"ID", "id", 1}, {"Object ID", "asset_id", 1}, {"Barcode", "object_data.internal_identifier", 3},
 				{"Price", "price", 1}, {"Created", "created_at", 2}},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
-				return cl.CircularityHubItemsList(ctx, serverSearch(q, "name"))
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
+				return withoutTotal(cl.CircularityHubItemsList(ctx, serverSearch(q)))
 			},
 			get: func(ctx context.Context, cl *client.Client, id string) (Item, error) {
 				n, err := atoi(id)
@@ -520,14 +584,14 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Hub orders", singular: "hub order", idKey: "id",
+			title: "Hub orders", cli: "hub orders", searchKey: "order_number", filterable: true, sort: sortMany, singular: "hub order", idKey: "id",
 			columns: []column{{"Order", "order_number", 3}, {"Created", "created_at", 3}, {"Total", "total_price", 2}, {"Completed", "completed", 1}, {"Cancelled", "cancelled", 1}},
-			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, error) {
-				orders, err := cl.CircularityHubOrdersList(ctx, serverSearch(q, "order_number"))
+			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
+				orders, err := cl.CircularityHubOrdersList(ctx, serverSearch(q))
 				if err != nil {
-					return nil, err
+					return nil, 0, err
 				}
-				return toItems(orders)
+				return withoutTotal(toItems(orders))
 			},
 			get: func(ctx context.Context, cl *client.Client, id string) (Item, error) {
 				n, err := atoi(id)

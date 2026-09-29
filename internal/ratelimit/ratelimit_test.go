@@ -172,7 +172,8 @@ func TestContextCancelWhileWaiting(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
-	if _, err := hc.Do(req); err == nil {
+	if resp, err := hc.Do(req); err == nil {
+		_ = resp.Body.Close()
 		t.Fatal("expected error when context ends before a token is available")
 	} else if !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "context deadline") &&
 		!strings.Contains(err.Error(), "would exceed context deadline") {

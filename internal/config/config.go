@@ -23,6 +23,9 @@ type Profile struct {
 	Username string `yaml:"username,omitempty"`
 	// RateLimit in requests per minute; nil means the API default.
 	RateLimit *int `yaml:"rate_limit,omitempty"`
+	// PageSize is the number of rows per page in the interactive UI; nil
+	// means its default.
+	PageSize *int `yaml:"page_size,omitempty"`
 }
 
 // Config is the on-disk configuration file.
@@ -65,20 +68,32 @@ func Load(dir string) (*Config, error) {
 	return c, nil
 }
 
-// Save writes the config atomically.
+// Save writes the config atomically. Each save writes its own temporary
+// file (mode 0600), so concurrent saves cannot corrupt each other.
 func (c *Config) Save() error {
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
+	dir := filepath.Dir(c.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return err
 	}
-	tmp := c.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	f, err := os.CreateTemp(dir, ".config-*.yaml")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, c.path)
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), c.path)
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+	}
+	return err
 }
 
 // Path returns the config file path.

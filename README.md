@@ -81,9 +81,14 @@ For CI and agents, credentials can come from the environment instead:
 | `reports` | templates, create (PDF) |
 | `api <METHOD> <path>` | any endpoint, raw |
 | `auth`, `config` | login/logout/status/token/refresh, profiles |
-| `describe` | machine-readable catalog of all commands, flags and exit codes |
+| `describe` | compact command overview; full machine-readable catalog with `--agent` |
 
 Every command has `--help` and a man page (`man seventhings-objects-list`).
+
+`seventhings describe` shows a compact command overview in an interactive
+terminal. Use `--agent` or `--output json` for the complete catalog of commands,
+flags and exit codes. Agent mode and output filters (`--jq`, `--fields`) retain
+the full structured catalog.
 
 Common flags:
 - `-o json|ndjson|yaml|table` sets the output format.
@@ -91,6 +96,13 @@ Common flags:
 - `--fields a,b` keeps only the named top-level fields.
 - `--dry-run` prints write requests instead of sending them.
 - `--yes` confirms destructive actions without prompting.
+
+Raw `api DELETE` requests also require confirmation (`--yes` in agent mode).
+File downloads, thumbnails and reports refuse to replace an existing output
+file unless you pass `--overwrite`. Saves use a private temporary file and
+commit only after the complete contents have been written; a failed save does
+not truncate the original file. New saved files have private permissions (`0600`
+on Unix).
 
 Updates to tasks, rental cases and field definitions keep every field you don't give, even though the API replaces the whole record (PUT).
 
@@ -128,7 +140,9 @@ The API allows 200 requests per minute by default. The CLI enforces this client-
 ## Interactive UI
 
 `seventhings` (or `seventhings ui`) opens a full-screen UI with a tab for each resource:
-- **Browse:** search with `/`, page with `[` and `]`, `enter` opens details, `h` shows history.
+- **Browse:** select rows with `↑`/`↓`; press `j` for the next page and `k` for the previous page (Page Down/Up and `]`/`[` also work). Search with `s` (or `/`), `enter` opens details, `h` shows history. In details, history, help and Settings, `j`/`k` move down/up instead. The footer shows "page X of Y" where the API reports a total. `esc` cancels a request that is still loading.
+- **Filter and sort:** `f` takes the same filters as `--filter` (one `field op value` per line) and a sort such as `-updated_at`, where the API supports them: objects, rooms, locations, rental cases and the circularity hub. Persons and users can only be sorted. `esc` clears the search, filter and sort.
+- **Copy:** `y` copies the selected record's ID. `Y` copies the CLI command for the current view, e.g. `seventhings objects list --filter 'inventory_name like Laptop' --sort -updated_at`. Copying uses OSC 52, which also works over SSH; in tmux, turn on `set-clipboard`.
 - **Pictures:** details show the record's picture, and the Files tab previews images. `p` hides or shows them. `O` opens the file (any type) in your system's default viewer; over SSH, use `D` to download it instead. The best supported format is detected automatically:
   - full resolution with the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (kitty, Ghostty, WezTerm)
   - full resolution with iTerm2 inline images (iTerm2, and VS Code with `terminal.integrated.enableImages` turned on)
@@ -136,6 +150,17 @@ The API allows 200 requests per minute by default. The CLI enforces this client-
   - colored half-block characters everywhere else, including tmux, macOS Terminal and Alacritty
 
   Set `SEVENTHINGS_IMAGES` to `kitty`, `iterm2`, `sixel`, `blocks` or `off` to override the detection (default `auto`).
+- **Settings:** the last tab (`,`) shows the active profile and lets you set the page size (rows per page, default 50, at most 100) and the rate limit, log out, and switch between configured profiles. Profile switching clears tenant-specific data and opens login if needed. Explicit profile, URL and credential overrides prevent switching; Settings explains which override to remove. Settings cannot change while a write is pending. Both numeric settings are saved to the profile and preserved on login; `--rate-limit` and `SEVENTHINGS_RATE_LIMIT` still take precedence. Outside the UI, use `seventhings config set <profile> --profile-page-size N`.
+
+Failed form submissions keep their entered values for correction and manual
+retry. Writes are never retried automatically after a network failure; check
+whether the operation succeeded before submitting again. Duplicate mutations
+are blocked while a write is pending. Downloads ask before replacing an existing
+file.
+
+Forms and tables adapt to terminal size (minimum 40 columns × 16 rows). `?` opens
+scrollable help. Date inputs require a real `YYYY-MM-DD` date; datetimes also
+accept `YYYY-MM-DDTHH:MM[:SS]`, a space in place of `T`, and RFC 3339 timezones.
 
 Press `?` for all keys.
 

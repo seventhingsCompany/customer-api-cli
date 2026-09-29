@@ -28,6 +28,7 @@ func attachmentFields(defs []models.FieldDefinition) [][2]string {
 
 // startAttach uploads a local file and attaches it to a file field.
 func (m *Model) startAttach(r *resource, it Item) tea.Cmd {
+	m.navigate()
 	id := r.id(it)
 	return m.withDefs(r.template, func() tea.Cmd {
 		fieldChoices := attachmentFields(m.defs[r.template])
@@ -42,12 +43,12 @@ func (m *Model) startAttach(r *resource, it Item) tea.Cmd {
 		title := fmt.Sprintf("Attach a file to %q", displayName(it, id))
 		return m.openCustomForm(title, fields, func(rf *recordForm) tea.Cmd {
 			field, path := rf.value("field"), expandHome(rf.value("path"))
-			return m.run(func(cl *client.Client) tea.Msg {
-				fileUUID, err := uploadFile(m.ctx, cl, path)
+			return m.run(func(ctx context.Context, cl *client.Client) tea.Msg {
+				fileUUID, err := uploadFile(ctx, cl, path)
 				if err != nil {
 					return doneMsg{err: fmt.Errorf("upload: %w", err)}
 				}
-				resp, err := r.attach(m.ctx, cl, id, []models.FileAttachment{{FieldKey: field, FileUUID: fileUUID}}, false)
+				resp, err := r.attach(ctx, cl, id, []models.FileAttachment{{FieldKey: field, FileUUID: fileUUID}}, false)
 				return attachResult(resp, err, fmt.Sprintf("Attached %s to %s", filepath.Base(path), field))
 			})
 		})
@@ -56,6 +57,7 @@ func (m *Model) startAttach(r *resource, it Item) tea.Cmd {
 
 // startDetach removes one attached file after confirmation.
 func (m *Model) startDetach(r *resource, it Item) tea.Cmd {
+	m.navigate()
 	id := r.id(it)
 	return m.withDefs(r.template, func() tea.Cmd {
 		var choices [][2]string
@@ -80,8 +82,8 @@ func (m *Model) startDetach(r *resource, it Item) tea.Cmd {
 			choice := rf.value("file")
 			field, fileUUID, _ := strings.Cut(choice, "|")
 			m.ask(fmt.Sprintf("Remove %s? The file stays in Files. [y/N]", names[choice]), func() tea.Cmd {
-				return m.run(func(cl *client.Client) tea.Msg {
-					resp, err := r.attach(m.ctx, cl, id, []models.FileAttachment{{FieldKey: field, FileUUID: fileUUID}}, true)
+				return m.run(func(ctx context.Context, cl *client.Client) tea.Msg {
+					resp, err := r.attach(ctx, cl, id, []models.FileAttachment{{FieldKey: field, FileUUID: fileUUID}}, true)
 					return attachResult(resp, err, "Removed "+names[choice])
 				})
 			})
@@ -96,7 +98,7 @@ func attachResult(resp *client.Response, err error, ok string) tea.Msg {
 		return doneMsg{err: err}
 	}
 	if resp.StatusCode == http.StatusMultiStatus {
-		return doneMsg{err: fmt.Errorf("partially failed (HTTP 207): %s", strings.Join(strings.Fields(string(resp.Body)), " "))}
+		return doneMsg{err: fmt.Errorf("partially failed (HTTP 207): %s", strings.Join(strings.Fields(string(resp.Body)), " ")), reload: true}
 	}
 	return doneMsg{text: ok, reload: true}
 }
@@ -104,10 +106,11 @@ func attachResult(resp *client.Response, err error, ok string) tea.Msg {
 // startHubOffer offers an object on the circularity hub. Category and price
 // are prefilled from the API's suggestions and must be confirmed.
 func (m *Model) startHubOffer(r *resource, it Item) tea.Cmd {
+	m.navigate()
 	id := r.id(it)
 	name := displayName(it, id)
-	return m.run(func(cl *client.Client) tea.Msg {
-		cat, price := hubSuggestions(m.ctx, cl, id)
+	return m.prepare(func(ctx context.Context, cl *client.Client) tea.Msg {
+		cat, price := hubSuggestions(ctx, cl, id)
 		return cmdMsg{fn: func() tea.Cmd {
 			fields := []*editField{
 				{key: "category", label: "Category", required: true, kind: models.FieldTypeText, orig: cat},
@@ -117,8 +120,8 @@ func (m *Model) startHubOffer(r *resource, it Item) tea.Cmd {
 				category, price := rf.value("category"), strings.ReplaceAll(rf.value("price"), ",", ".")
 				m.ask(fmt.Sprintf("Offer %q on the circularity hub as %q for %s? This publishes a resale listing. [y/N]",
 					name, category, price), func() tea.Cmd {
-					return m.run(func(cl *client.Client) tea.Msg {
-						err := cl.CircularityHubAddObjects(m.ctx, map[string]models.AddObjectEntry{id: {Category: category, Price: price}})
+					return m.run(func(ctx context.Context, cl *client.Client) tea.Msg {
+						err := cl.CircularityHubAddObjects(ctx, map[string]models.AddObjectEntry{id: {Category: category, Price: price}})
 						return doneMsg{text: fmt.Sprintf("Offered %q on the circularity hub", name), err: err}
 					})
 				})
@@ -156,12 +159,12 @@ func hubSuggestions(ctx context.Context, cl *client.Client, uuid string) (catego
 func (m *Model) startHubOrder(r *resource, it Item) {
 	idStr := r.id(it)
 	m.ask(fmt.Sprintf("Create a circularity hub order for item #%s? [y/N]", idStr), func() tea.Cmd {
-		return m.run(func(cl *client.Client) tea.Msg {
+		return m.run(func(ctx context.Context, cl *client.Client) tea.Msg {
 			id, err := strconv.Atoi(idStr)
 			if err != nil {
 				return doneMsg{err: err}
 			}
-			orderID, err := cl.CircularityHubOrderCreate(m.ctx, []int{id})
+			orderID, err := cl.CircularityHubOrderCreate(ctx, []int{id})
 			return doneMsg{text: fmt.Sprintf("Created hub order %d", orderID), err: err, reload: true}
 		})
 	})

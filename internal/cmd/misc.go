@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"runtime"
 	"sort"
 	"strings"
@@ -72,10 +73,15 @@ type commandDoc struct {
 func (a *App) describeCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "describe",
-		Short: "Print a machine-readable catalog of all commands (for agents)",
-		Long: `Print a JSON catalog of every command with its flags, plus exit codes,
+		Short: "Show a command overview, or a full catalog for agents",
+		Long: `Show a compact command overview in an interactive terminal.
+
+In agent mode, print a JSON catalog of every command with its flags, plus exit codes,
 filter operators, environment variables and the agent-mode contract. Agents
-should read this instead of parsing --help.`,
+should read this instead of parsing --help.
+
+Use --agent or --output json for the full catalog. --jq and --fields also select
+the full catalog, so filters work consistently in either mode.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := cmd.Root()
@@ -99,6 +105,14 @@ should read this instead of parsing --help.`,
 				})
 				cmds = append(cmds, d)
 			})
+			if a.interactive() && a.outputFlag == "" && a.jqFlag == "" && len(a.fieldsFlag) == 0 && !a.rawFlag {
+				return a.describeOverview(cmds)
+			}
+			// Explicit formats and projections get structured data, never the
+			// abbreviated nested cells of the interactive table default.
+			if a.outputFlag == "" {
+				a.printer.Format = output.JSON
+			}
 
 			var global []flagDoc
 			root.PersistentFlags().VisitAll(func(f *pflag.Flag) { global = append(global, docFlag(f)) })
@@ -149,6 +163,46 @@ should read this instead of parsing --help.`,
 		},
 	}
 	return annotate(c, annAuth, "none")
+}
+
+// describeOverview groups subcommands into a small, untruncated human menu.
+func (a *App) describeOverview(commands []commandDoc) error {
+	groups := map[string][]string{}
+	width := 0
+	for _, command := range commands {
+		group, action := command.Command, command.Summary
+		if i := strings.LastIndexByte(group, ' '); i >= 0 {
+			group, action = group[:i], group[i+1:]
+		}
+		groups[group] = append(groups[group], action)
+		width = max(width, len(group))
+	}
+	var names []string
+	for name := range groups {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var text strings.Builder
+	text.WriteString("seventhings — command overview\n\n")
+	for _, name := range names {
+		sort.Strings(groups[name])
+		line := strings.Join(groups[name], ", ")
+		prefix := fmt.Sprintf("  %-*s  ", width, name)
+		indent := strings.Repeat(" ", len(prefix))
+		// Wrap between words instead of shortening command names or lists.
+		for len(prefix)+len(line) > 88 {
+			cut := strings.LastIndexByte(line[:max(88-len(prefix), 1)], ' ')
+			if cut <= 0 {
+				break
+			}
+			text.WriteString(prefix + line[:cut] + "\n")
+			line, prefix = line[cut+1:], indent
+		}
+		text.WriteString(prefix + line + "\n")
+	}
+	text.WriteString("\nDetails:   seventhings <command> --help\nFull JSON: seventhings describe --agent\n")
+	_, err := fmt.Fprint(a.io.Out, text.String())
+	return err
 }
 
 func inherited(c *cobra.Command, key, val string) bool {

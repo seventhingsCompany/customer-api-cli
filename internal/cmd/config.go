@@ -5,11 +5,12 @@ import (
 
 	"github.com/SeventhingsCompany/customer-api-cli/internal/config"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/exitcode"
+	"github.com/SeventhingsCompany/customer-api-cli/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 func (a *App) configCmd() *cobra.Command {
-	c := &cobra.Command{Use: "config", Short: "Manage profiles (instance URL, client ID, rate limit)"}
+	c := &cobra.Command{Use: "config", Short: "Manage profiles (instance URL, client ID, rate limit, page size)"}
 
 	list := &cobra.Command{
 		Use:   "list",
@@ -23,6 +24,9 @@ func (a *App) configCmd() *cobra.Command {
 				row := map[string]any{"name": n, "url": p.URL, "client_id": p.ClientID, "username": p.Username, "active": n == active}
 				if p.RateLimit != nil {
 					row["rate_limit"] = *p.RateLimit
+				}
+				if p.PageSize != nil {
+					row["page_size"] = *p.PageSize
 				}
 				rows = append(rows, row)
 			}
@@ -47,7 +51,7 @@ func (a *App) configCmd() *cobra.Command {
 	}
 
 	var url, clientID, username string
-	var rateLimit int
+	var rateLimit, pageSize int
 	set := &cobra.Command{
 		Use:   "set <profile>",
 		Short: "Create or update a profile",
@@ -75,6 +79,16 @@ func (a *App) configCmd() *cobra.Command {
 					p.RateLimit = &rateLimit
 				}
 			}
+			if f.Changed("profile-page-size") {
+				switch {
+				case pageSize < 0:
+					p.PageSize = nil
+				case pageSize < 1 || pageSize > tui.MaxPageSize:
+					return exitcode.Usagef("--profile-page-size must be between 1 and %d", tui.MaxPageSize)
+				default:
+					p.PageSize = &pageSize
+				}
+			}
 			if a.cfg.CurrentProfile == "" {
 				a.cfg.CurrentProfile = args[0]
 			}
@@ -88,6 +102,7 @@ func (a *App) configCmd() *cobra.Command {
 	set.Flags().StringVar(&clientID, "client-id", "", "OAuth client ID")
 	set.Flags().StringVar(&username, "username", "", "username")
 	set.Flags().IntVar(&rateLimit, "profile-rate-limit", -1, "requests per minute for this tenant (-1 resets to the default)")
+	set.Flags().IntVar(&pageSize, "profile-page-size", -1, "rows per page in the interactive UI (-1 resets to the default)")
 	// The local --url shadows the global --url, which selects the instance for API calls.
 
 	del := &cobra.Command{

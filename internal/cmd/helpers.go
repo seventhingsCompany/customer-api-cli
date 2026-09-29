@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"strconv"
 	"strings"
 
 	"github.com/SeventhingsCompany/customer-api-cli/internal/exitcode"
+	"github.com/SeventhingsCompany/customer-api-cli/internal/filesave"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/input"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/listflags"
 	"github.com/SeventhingsCompany/customer-api-go/client"
@@ -96,7 +98,7 @@ func (f *filterObjectFlags) build(a *App) (models.FilterObject, error) {
 
 // writeBinary writes downloaded bytes to path, or stdout for "-". Raw bytes
 // are never written to a terminal.
-func (a *App) writeBinary(data []byte, path string, meta map[string]any) error {
+func (a *App) writeBinary(data []byte, path string, overwrite bool, meta map[string]any) error {
 	if a.dryRun {
 		return nil
 	}
@@ -110,7 +112,10 @@ func (a *App) writeBinary(data []byte, path string, meta map[string]any) error {
 		_, err := a.io.Out.Write(data)
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := filesave.Write(path, data, overwrite); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return exitcode.Usagef("%s already exists; pass --overwrite to replace it", path)
+		}
 		return err
 	}
 	meta["path"] = path
@@ -118,8 +123,9 @@ func (a *App) writeBinary(data []byte, path string, meta map[string]any) error {
 	return a.done(fmt.Sprintf("Wrote %d bytes to %s", len(data), path), meta)
 }
 
-func addOutFlag(c *cobra.Command, out *string) {
+func addOutFlag(c *cobra.Command, out *string, overwrite *bool) {
 	c.Flags().StringVarP(out, "out", "O", "", "write to this file, or - for stdout")
+	c.Flags().BoolVar(overwrite, "overwrite", false, "replace an existing output file")
 }
 
 // csvInts parses repeated/comma-separated integer flags.

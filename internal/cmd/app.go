@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SeventhingsCompany/customer-api-cli/internal/auth"
@@ -38,6 +39,7 @@ type BuildInfo struct {
 
 // App holds global state shared by all commands.
 type App struct {
+	tuiMu     sync.Mutex // protects adapter state shared with login/logout workers
 	io        IO
 	getenv    func(string) string
 	transport http.RoundTripper // innermost transport; replaced in tests
@@ -146,20 +148,26 @@ func (a *App) clientID() string {
 
 // rateLimitPerMinute: --rate-limit > SEVENTHINGS_RATE_LIMIT > profile > default.
 func (a *App) rateLimitPerMinute() (int, error) {
+	n, _, err := a.rateLimitSetting()
+	return n, err
+}
+
+// rateLimitSetting also returns where the limit comes from.
+func (a *App) rateLimitSetting() (n int, source string, err error) {
 	if a.rateLimit >= 0 {
-		return a.rateLimit, nil
+		return a.rateLimit, "--rate-limit", nil
 	}
 	if s := a.getenv("SEVENTHINGS_RATE_LIMIT"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 0 {
-			return 0, exitcode.Usagef("SEVENTHINGS_RATE_LIMIT must be a non-negative integer, got %q", s)
+			return 0, "", exitcode.Usagef("SEVENTHINGS_RATE_LIMIT must be a non-negative integer, got %q", s)
 		}
-		return n, nil
+		return n, "SEVENTHINGS_RATE_LIMIT", nil
 	}
 	if _, p := a.profile(); p.RateLimit != nil {
-		return *p.RateLimit, nil
+		return *p.RateLimit, "profile", nil
 	}
-	return ratelimit.DefaultPerMinute, nil
+	return ratelimit.DefaultPerMinute, "default", nil
 }
 
 // httpBase is the shared transport stack below auth: debug logging and rate
@@ -179,9 +187,12 @@ func (a *App) httpBase() (http.RoundTripper, error) {
 	a.baseHTTP = ratelimit.New(base, rpm, ratelimit.WithNotify(func(wait time.Duration, attempt int) {
 		msg := fmt.Sprintf("rate limited (429), retrying in %s (attempt %d/%d)",
 			wait.Round(100*time.Millisecond), attempt, ratelimit.DefaultMaxRetries)
+		a.tuiMu.Lock()
+		notify := a.notify
+		a.tuiMu.Unlock()
 		switch {
-		case a.notify != nil:
-			a.notify(msg)
+		case notify != nil:
+			notify(msg)
 		case a.debug || a.interactive():
 			_, _ = fmt.Fprintln(a.io.Err, msg)
 		}

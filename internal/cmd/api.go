@@ -27,16 +27,21 @@ func (a *App) apiCmd() *cobra.Command {
 relative to /customer-api/v1. Use this for endpoints that have no dedicated
 command yet. Rate limiting and token refresh apply as usual.
 
-Query parameters given with -q are appended with brackets kept literal, so
-PHP-style filters work: -q 'filter[name][like][]=Laptop'.`,
+Query parameters given with --query are appended with brackets kept literal, so
+PHP-style filters work: --query 'filter[name][like][]=Laptop'.`,
 		Example: `  seventhings api GET objects/count
-  seventhings api GET objects -q per_page=5 -q 'sort[name]=ASC'
+  seventhings api GET objects --query per_page=5 --query 'sort[name]=ASC'
   seventhings api PATCH object/<uuid> --set name=Renamed
   seventhings api POST object --data @object.json --include`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			method := strings.ToUpper(args[0])
 			path := args[1]
+			if method == "DELETE" {
+				if err := a.confirm("DELETE " + path); err != nil {
+					return err
+				}
+			}
 			if len(query) > 0 {
 				sep := "?"
 				if strings.Contains(path, "?") {
@@ -107,7 +112,13 @@ PHP-style filters work: -q 'filter[name][like][]=Laptop'.`,
 				} else if len(resp.Body) > 0 {
 					out["body"] = string(resp.Body)
 				}
-				return a.print(out)
+				if err := a.print(out); err != nil {
+					return err
+				}
+				if resp.StatusCode == 207 {
+					return &exitcode.PartialError{}
+				}
+				return nil
 			}
 			switch {
 			case isJSON:
