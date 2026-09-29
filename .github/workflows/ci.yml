@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.14.0
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      # The race detector needs cgo; run it on Linux only.
+      - run: go test ${{ matrix.os == 'ubuntu-latest' && '-race' || '' }} ./...
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  # Builds every release artifact (binaries, archives, checksums)
+  # without publishing, so packaging breaks show up before a tag is pushed.
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7.2.3
+        with:
+          version: v2.18.2
+          args: release --snapshot --clean --skip=sign
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snapshot
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          retention-days: 3
+
+  # Installs the snapshot with the install scripts on every OS, served from a
+  # local web server laid out like GitHub releases.
+  install-scripts:
+    needs: release-snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      SEVENTHINGS_DOWNLOAD_URL: http://127.0.0.1:8765/releases
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: snapshot
+          path: www/releases/latest/download
+      # The server is started in the same step as the install, so it is
+      # still running on every runner OS.
+      - name: install.sh
+        if: runner.os != 'Windows'
+        run: |
+          (cd www && python3 -m http.server 8765 >/dev/null 2>&1 &)
+          sleep 2
+          sh install.sh --bin-dir "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/seventhings" version
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Process python -ArgumentList '-m', 'http.server', '8765' -WorkingDirectory www -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+          $env:SEVENTHINGS_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bin'
+          ./install.ps1
+          & (Join-Path $env:SEVENTHINGS_INSTALL_DIR 'seventhings.exe') version

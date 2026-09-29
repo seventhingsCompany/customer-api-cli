@@ -1,0 +1,98 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# Release: push a tag (vX.Y.Z); .github/workflows/release.yml runs goreleaser.
+# Local dry run: goreleaser release --snapshot --clean --skip=sign
+version: 2
+
+project_name: seventhings
+
+before:
+  hooks:
+    - go mod verify
+    # Man pages and shell completions, shipped in the archives.
+    - rm -rf build/docs
+    # The commit timestamp dates the man pages (reproducible builds).
+    - go run ./internal/gendocs build/docs {{ .CommitTimestamp }}
+
+builds:
+  - id: seventhings
+    main: ./cmd/seventhings
+    binary: seventhings
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - src: build/docs/man/*
+        dst: man
+      - src: build/docs/completions/*
+        dst: completions
+
+checksum:
+  name_template: checksums.txt
+
+# Keyless signing of the checksum file with Sigstore (GitHub OIDC).
+# Verify: cosign verify-blob --bundle checksums.txt.sigstore.json \
+#   --certificate-identity-regexp 'https://github.com/SeventhingsCompany/customer-api-cli/' \
+#   --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other changes
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: SeventhingsCompany
+    name: customer-api-cli
+  prerelease: auto
+  # Versioned copies of the install scripts, next to the binaries.
+  extra_files:
+    - glob: install.sh
+    - glob: install.ps1
+  footer: |
+    **Install**
+    - Linux/macOS: `curl -fsSL https://github.com/SeventhingsCompany/customer-api-cli/releases/download/{{ .Tag }}/install.sh | sh -s -- --version {{ .Tag }}`
+    - Windows (PowerShell): `$env:SEVENTHINGS_VERSION='{{ .Tag }}'; irm https://github.com/SeventhingsCompany/customer-api-cli/releases/download/{{ .Tag }}/install.ps1 | iex`
+    - Or download the archive for your platform below.
+
+    Verify downloads with `checksums.txt` and its Sigstore bundle (see README).

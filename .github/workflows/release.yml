@@ -1,0 +1,48 @@
+name: Release
+
+# Publishes a GitHub release when a version tag (e.g. v1.0.0) is pushed:
+# binaries for Linux/macOS/Windows, the install scripts, and checksums
+# signed with Sigstore (keyless, via GitHub OIDC).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://github.com/SeventhingsCompany/customer-api-cli/releases
+    permissions:
+      contents: write # create the release and upload assets
+      id-token: write # Sigstore keyless signing
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: sigstore/cosign-installer@v4.1.2
+      - uses: goreleaser/goreleaser-action@v7.2.3
+        with:
+          version: v2.18.2
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
