@@ -448,6 +448,11 @@ func (m *Model) fail(err error) tea.Cmd {
 }
 
 func isAuthError(err error) bool {
+	if apiErr, ok := errors.AsType[*models.APIError](err); ok {
+		// A missing feature or permission (403) cannot be fixed by logging in
+		// again. Keep the current view and allow other resources to be used.
+		return apiErr.StatusCode == 401
+	}
 	return exitcode.For(err) == exitcode.Auth
 }
 
@@ -475,8 +480,8 @@ func errText(err error) string {
 }
 
 func displayName(it Item, fallback string) string {
-	for _, k := range []string{"inventory_name", "name", "title", "display_name", "email", "order_number"} {
-		if s := str(it[k]); s != "" {
+	for _, k := range []string{"inventory_name", "name", "title", "display_name", "email", "order_number", "fields.catalog_object_inventory_name"} {
+		if s := str(lookup(it, k)); s != "" {
 			return s
 		}
 	}

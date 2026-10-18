@@ -51,6 +51,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 		f.mu.Unlock()
 		enc := json.NewEncoder(w)
 		if h, ok := f.extra[r.Method+" "+path]; ok {
+			r.Body = io.NopCloser(bytes.NewReader(body))
 			h(w, r)
 			return
 		}
@@ -318,7 +319,7 @@ func TestProgramEndToEnd(t *testing.T) {
 func TestListAndDetail(t *testing.T) {
 	f := newFakeAPI(t)
 	d := newDriver(t, &fakeDeps{url: f.srv.URL, loggedIn: true})
-	d.expect("Laptop Dell", "Desk", "2 objects on page 1", "1 Objects", "0 Hub orders")
+	d.expect("Laptop Dell", "Desk", "2 objects on page 1", "1 Objects", "C Catalog")
 
 	d.key("down", "enter")
 	d.expect("inventory_name", "Desk", "esc back")

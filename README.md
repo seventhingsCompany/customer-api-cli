@@ -193,6 +193,16 @@ cancelable. SDK response headers are retained on API errors without being logged
 ## Interactive UI
 
 `seventhings` (or `seventhings ui`) opens a full-screen UI with a tab for each resource:
+- **Catalog:** press `C` (or use Tab after Hub orders) to browse product catalog
+  items. Search, filter, sort, page through results, open details, create with
+  `n`/`N`, edit with `e`/`E`, delete with confirmation, and copy IDs or CLI commands
+  with `y`/`Y`. Forms use your instance's object-field definitions with catalog
+  field prefixes; object-only requirements such as a barcode do not apply.
+  Updates preserve fields you do not change, including fields the form cannot
+  edit. Catalog changes do not modify objects previously created from an item.
+  The product catalog feature and appropriate permissions are required; a
+  permission error does not prevent using other tabs. Existing `1`–`0` shortcuts
+  are unchanged, and Settings remains last.
 - **Browse:** select rows with `↑`/`↓`; press `j` for the next page and `k` for the previous page (Page Down/Up and `]`/`[` also work). Search with `s` (or `/`), `enter` opens details, `h` shows history. In details, history, help and Settings, `j`/`k` move down/up instead. The footer shows "page X of Y" where the API reports a total. `esc` cancels a request that is still loading.
 - **Filter and sort:** `f` takes the same filters as `--filter` (one `field op value` per line) and a sort such as `-updated_at`, where the API supports them: objects, rooms, locations, rental cases and the circularity hub. Persons and users can only be sorted. `esc` clears the search, filter and sort.
 - **Copy:** `y` copies the selected record's ID. `Y` copies the CLI command for the current view, e.g. `seventhings objects list --filter 'inventory_name like Laptop' --sort -updated_at`. Copying uses OSC 52, which also works over SSH; in tmux, turn on `set-clipboard`.

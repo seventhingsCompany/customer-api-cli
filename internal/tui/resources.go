@@ -80,6 +80,7 @@ type resource struct {
 	title    string
 	singular string
 	cli      string // CLI command group, e.g. "rental-cases" or "hub items"
+	shortcut string // nonnumeric shortcut for resources after the first ten
 	// searchKey is the field a search matches on the server (like);
 	// resources without one search client-side.
 	searchKey string
@@ -90,6 +91,7 @@ type resource struct {
 	// used when a resource has no template.
 	template models.AssetTrackingTemplate
 	fixed    []formField
+	fields   func([]models.FieldDefinition, Item, bool) []*editField
 
 	// filterable resources take the CLI's filter syntax (key f); sort is
 	// how they can be sorted, sortFields limits the fields.
@@ -128,6 +130,22 @@ func (r *resource) id(it Item) string {
 		return str(it["uuid"])
 	}
 	return id
+}
+
+func (m *Model) tabKey(i int) string {
+	if key := m.res[i].shortcut; key != "" {
+		return key
+	}
+	return fmt.Sprint((i + 1) % 10)
+}
+
+func (m *Model) tabForKey(key string) (int, bool) {
+	for i := range m.res {
+		if m.tabKey(i) == key {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // lookup reads a possibly dotted key ("object_data.internal_identifier").
@@ -611,5 +629,6 @@ func resources() []*resource {
 				return toItem(o)
 			},
 		},
+		catalogResource(),
 	}
 }

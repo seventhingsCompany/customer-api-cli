@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.2
+
+- Add the Catalog tab to the interactive UI, accessible with `C` or Tab after
+  Hub orders, without changing existing numeric shortcuts.
+- Support catalog browsing, search, filters, sorting, pagination, details,
+  create/edit/delete, and copying IDs and CLI commands.
+- Build catalog forms from the instance's object schema, translating field keys
+  to the catalog namespace without imposing object-only mandatory fields.
+- Preserve unspecified catalog fields through a fresh read before replacement
+  updates, and retain failed form input for manual retry.
+- Keep catalog and active-tab labels visible on narrow terminals.
+- Show permission/feature errors without forcing a new login; expired sessions
+  still open the login form.
+
 ## v0.2.1
 
 - Correct the case-sensitive Sigstore certificate identity in the installer and
