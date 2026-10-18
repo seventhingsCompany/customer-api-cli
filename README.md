@@ -37,7 +37,7 @@ Alternatives:
 ```sh
 cosign verify-blob checksums.txt \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/SeventhingsCompany/customer-api-cli/' \
+  --certificate-identity-regexp '^https://github.com/seventhingsCompany/customer-api-cli/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum --ignore-missing -c checksums.txt
 ```
