@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/SeventhingsCompany/customer-api-cli/internal/exitcode"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/input"
@@ -118,7 +119,9 @@ func (a *App) tasksCmd() *cobra.Command {
 		Use:   "create",
 		Short: "Create a task",
 		Long: `Create a task. The API requires a title, a deadline, at least one assignee
-and at least one referenced object.`,
+and at least one referenced object. Omitted reminders use the API defaults.
+Use --set 'reminders:=[]' to disable reminders, or for example
+--set 'reminders:=[{"unit":"days","value":0}]' to remind on the deadline.`,
 		Example: `  seventhings tasks create --title "Check fire extinguisher" --deadline 2026-12-31 \
     --assignee <user-uuid> --object <object-uuid>
   seventhings tasks create --data @task.json`,
@@ -145,7 +148,7 @@ and at least one referenced object.`,
 			if in.Deadline == nil || *in.Deadline == "" {
 				return exitcode.Usagef("--deadline is required")
 			}
-			emptyTaskSlices(&in.Assignees, &in.References, &in.Reminders)
+			emptyTaskSlices(&in.Assignees, &in.References)
 			cl, err := a.Client()
 			if err != nil {
 				return err
@@ -163,7 +166,10 @@ and at least one referenced object.`,
 	update := &cobra.Command{
 		Use:   "update <uuid>",
 		Short: "Update a task (fields not given keep their current values)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update a task, preserving omitted fields including reminders.
+Use --set 'reminders:=[]' to disable reminders, or for example
+--set 'reminders:=[{"unit":"days","value":0}]' to remind on the deadline.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := uf.body(a, cmd)
 			if err != nil {
@@ -181,7 +187,7 @@ and at least one referenced object.`,
 			if err := input.Merge(cur, body, &in, input.AttachmentUUIDs); err != nil {
 				return err
 			}
-			emptyTaskSlices(&in.Assignees, &in.References, &in.Reminders)
+			emptyTaskSlices(&in.Assignees, &in.References)
 			if err := cl.TaskUpdate(cmd.Context(), args[0], in); err != nil {
 				return err
 			}
@@ -219,16 +225,13 @@ and at least one referenced object.`,
 	return c
 }
 
-// emptyTaskSlices sends [] instead of null for list fields the user omitted.
-func emptyTaskSlices(assignees *[]string, refs *[]models.TaskReferenceInput, reminders *[]models.TimeInterval) {
+// emptyTaskSlices normalizes required lists, leaving optional reminders untouched.
+func emptyTaskSlices(assignees *[]string, refs *[]models.TaskReferenceInput) {
 	if *assignees == nil {
 		*assignees = []string{}
 	}
 	if *refs == nil {
 		*refs = []models.TaskReferenceInput{}
-	}
-	if *reminders == nil {
-		*reminders = []models.TimeInterval{}
 	}
 }
 
@@ -238,6 +241,8 @@ type rentalInputFlags struct {
 	sets               []string
 	title, renter      string
 	issueDate, dueDate string
+	issueAt, dueAt     string
+	isFullDay          bool
 	comment, respUser  string
 	objects            []string
 }
@@ -248,6 +253,9 @@ func (f *rentalInputFlags) register(c *cobra.Command) {
 	c.Flags().StringVar(&f.renter, "renter", "", `renter as "user:<user-uuid>" or "plain:<name>"`)
 	c.Flags().StringVar(&f.issueDate, "issue-date", "", "issue date (ISO 8601)")
 	c.Flags().StringVar(&f.dueDate, "due-date", "", "due date (ISO 8601)")
+	c.Flags().StringVar(&f.issueAt, "issue-at", "", "pickup timestamp (RFC 3339, including timezone)")
+	c.Flags().StringVar(&f.dueAt, "due-at", "", "exclusive return timestamp (RFC 3339, including timezone)")
+	c.Flags().BoolVar(&f.isFullDay, "is-full-day", false, "full-day rental (false selects a timed rental; omitted lets the API infer/preserve)")
 	c.Flags().StringVar(&f.comment, "comment", "", "comment")
 	c.Flags().StringVar(&f.respUser, "responsible", "", "responsible user UUID")
 	c.Flags().StringArrayVar(&f.objects, "object", nil, "rented object UUID (repeatable)")
@@ -259,10 +267,20 @@ func (f *rentalInputFlags) body(a *App, cmd *cobra.Command) (map[string]any, err
 		return nil, err
 	}
 	fl := cmd.Flags()
-	for flag, key := range map[string]string{"title": "title", "issue-date": "issue_date", "due-date": "due_date", "comment": "comment", "responsible": "responsible_user_uuid"} {
+	for flag, key := range map[string]string{"title": "title", "issue-date": "issue_date", "due-date": "due_date", "issue-at": "issue_at", "due-at": "due_at", "comment": "comment", "responsible": "responsible_user_uuid"} {
 		if fl.Changed(flag) {
 			v, _ := fl.GetString(flag)
 			body[key] = v
+		}
+	}
+	if fl.Changed("is-full-day") {
+		body["is_full_day"] = f.isFullDay
+	}
+	for _, key := range []string{"issue_at", "due_at"} {
+		if value, ok := body[key].(string); ok {
+			if _, err := time.Parse(time.RFC3339, value); err != nil {
+				return nil, exitcode.Usagef("%s must be an RFC 3339 timestamp including timezone", key)
+			}
 		}
 	}
 	if fl.Changed("renter") {
@@ -324,7 +342,9 @@ func (a *App) rentalCasesCmd() *cobra.Command {
 		Use:   "create",
 		Short: "Create a rental case",
 		Long: `Create a rental case. The API requires a title, a renter, at least one
-object, issue and due dates, and a responsible user.`,
+object, issue and due dates, and a responsible user. For timed rentals, also give
+--issue-at and --due-at as RFC 3339 timestamps and optionally --is-full-day=false.
+The return timestamp is exclusive.`,
 		Example: `  seventhings rental-cases create --title "Beamer for workshop" --renter user:<user-uuid> \
     --object <object-uuid> --issue-date 2026-10-01 --due-date 2026-10-08 --responsible <user-uuid>`,
 		Args: cobra.NoArgs,
@@ -388,8 +408,11 @@ object, issue and due dates, and a responsible user.`,
 				return err
 			}
 			var in models.UpdateRentalCase
-			if err := input.Merge(cur, body, &in, input.AttachmentUUIDs); err != nil {
+			if err := input.Merge(cur, body, &in, input.RentalCaseFixup(body)); err != nil {
 				return err
+			}
+			if in.Renter == nil {
+				return exitcode.Usagef(`--renter is required ("user:<user-uuid>" or "plain:<name>")`)
 			}
 			if in.Attachments == nil {
 				in.Attachments = []string{}

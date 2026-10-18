@@ -65,6 +65,7 @@ func (a *App) filesCmd() *cobra.Command {
 	download := func(use, short string, fn func(*client.Client, context.Context, string) ([]byte, error)) *cobra.Command {
 		var out string
 		var overwrite bool
+		var width, height int
 		d := &cobra.Command{
 			Use:   use + " <uuid> --out <path|->",
 			Short: short,
@@ -73,11 +74,21 @@ func (a *App) filesCmd() *cobra.Command {
 				if out == "" {
 					return exitcode.Usagef("--out is required (a file path, or - for stdout)")
 				}
+				sized := cmd.Flags().Changed("width") || cmd.Flags().Changed("height")
+				if sized && (width < 1 || width > 2000 || height < 1 || height > 2000) {
+					return exitcode.Usagef("--width and --height must both be given, between 1 and 2000 pixels")
+				}
 				cl, err := a.Client()
 				if err != nil {
 					return err
 				}
-				data, err := fn(cl, cmd.Context(), args[0])
+				fetch := fn
+				if sized {
+					fetch = func(cl *client.Client, ctx context.Context, id string) ([]byte, error) {
+						return cl.FileGetThumbnailWithSize(ctx, id, width, height)
+					}
+				}
+				data, err := fetch(cl, cmd.Context(), args[0])
 				if err != nil {
 					return err
 				}
@@ -85,6 +96,11 @@ func (a *App) filesCmd() *cobra.Command {
 			},
 		}
 		addOutFlag(d, &out, &overwrite)
+		if use == "thumbnail" {
+			d.Flags().IntVar(&width, "width", 0, "thumbnail width (1–2000 pixels; requires --height)")
+			d.Flags().IntVar(&height, "height", 0, "thumbnail height (1–2000 pixels; requires --width)")
+			d.Long = "Download a thumbnail, optionally fitted within --width × --height while preserving aspect ratio. New sizes are cached by the API; excess sizes may be rejected with HTTP 422."
+		}
 		return d
 	}
 

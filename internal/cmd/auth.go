@@ -58,7 +58,7 @@ Password sources, in order: --password-stdin, SEVENTHINGS_PASSWORD, prompt
 			if err != nil {
 				return err
 			}
-			sdk := client.New(url, client.WithHTTPClient(&http.Client{Transport: base}))
+			sdk := client.New(url, client.WithHTTPClient(&http.Client{Transport: base}), client.WithRateLimit(0))
 
 			var tok *models.TokenResponse
 			if ssoProvider != "" {

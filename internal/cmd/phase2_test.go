@@ -118,7 +118,7 @@ func TestTaskCreateFlags(t *testing.T) {
 		t.Fatalf("exit %d: %s", r.code, r.err)
 	}
 	sent := api.body("POST task-management/task")
-	if sent["title"] != "Check" || len(sent["references"].([]any)) != 1 || sent["reminders"] == nil {
+	if sent["title"] != "Check" || len(sent["references"].([]any)) != 1 || sent["reminders"] != nil {
 		t.Errorf("body: %v", sent)
 	}
 	r = run(t, api.env(t), "", "tasks", "create", "--title", "No deadline", "--object", "o1", "--assignee", "u1")

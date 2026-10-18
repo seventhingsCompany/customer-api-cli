@@ -28,7 +28,7 @@ The scripts check the download against `checksums.txt`. If [cosign](https://docs
 
 Alternatives:
 - Archives for Linux, macOS and Windows (amd64, arm64) are attached to each [release](https://github.com/SeventhingsCompany/customer-api-cli/releases). They include man pages and shell completions.
-- From source (Go 1.27.1+): `go install github.com/SeventhingsCompany/customer-api-cli/cmd/seventhings@latest`
+- From source (Go 1.27.2+): `go install github.com/SeventhingsCompany/customer-api-cli/cmd/seventhings@latest`
 
 ### Verifying downloads
 
@@ -75,6 +75,7 @@ For CI and agents, credentials can come from the environment instead:
 | `users` | list, get |
 | `tasks` | list, get, create, update, set-status, delete, history |
 | `rental-cases` | list, get, create, update, delete, history |
+| `catalog-items` (alias `catalog`) | list, get, create, update, delete |
 | `files` | list, get, upload, download, thumbnail |
 | `fields` | list, mandatory, missing, get, create, update |
 | `hub items`, `hub orders` | circularity hub: list, get, update, delete, add-objects, suggestions, orders |
@@ -104,7 +105,53 @@ commit only after the complete contents have been written; a failed save does
 not truncate the original file. New saved files have private permissions (`0600`
 on Unix).
 
-Updates to tasks, rental cases and field definitions keep every field you don't give, even though the API replaces the whole record (PUT).
+Updates to tasks, rental cases, catalog items and field definitions keep every field you don't give, even though the API replaces the whole record (PUT).
+
+### Product catalog
+
+Requires the instance's product catalog feature and appropriate permissions.
+Catalog items contain a `uuid` and a `fields` map. Create/update input is the
+field map itself; the CLI wraps it for the API. Object field keys use the
+`catalog_object_` prefix; catalog metadata such as `id` has no prefix.
+
+```sh
+seventhings catalog-items list --filter 'catalog_object_inventory_name like Laptop' --sort -id
+seventhings catalog-items list --all                      # streams every page
+seventhings catalog-items create --set catalog_object_inventory_name=Laptop
+seventhings catalog-items update <uuid> --set catalog_object_manufacturer=Example
+seventhings catalog-items delete <uuid> --yes
+```
+
+Updates merge your fields into the current field map before sending PUT, so
+omitted fields are retained. Use `--set 'field_key:=null'` to clear a field.
+Updating or deleting an item does not change objects created from it.
+
+### Timed rentals, reminders and thumbnails
+
+Rental create/update accepts `--issue-at` and `--due-at` as RFC 3339 timestamps
+including a timezone, and `--is-full-day=false` for timed rentals. Issue/due dates
+are still required on create; the return timestamp is exclusive.
+
+```sh
+seventhings rental-cases create --title 'Workshop loan' --renter plain:Jane \
+  --object <object-uuid> --responsible <user-uuid> \
+  --issue-date 2026-12-01 --due-date 2026-12-01 --is-full-day=false \
+  --issue-at 2026-12-01T09:00:00+01:00 --due-at 2026-12-01T11:00:00+01:00
+seventhings rental-cases update <uuid> --is-full-day --due-date 2026-12-02
+seventhings tasks update <uuid> --set 'reminders:=[]'       # disable reminders
+seventhings tasks update <uuid> --set 'reminders:=[{"unit":"days","value":0}]'
+seventhings files thumbnail <file-uuid> --width 320 --height 240 --out thumb.png
+```
+
+Omitted task reminders use API defaults on create and retain current reminders
+on update. An empty array disables reminders; a zero interval reminds on the
+deadline. This also applies to tasks created in the interactive UI. Rental updates
+preserve the renter, rental kind and timestamps unless changed. Date-only changes
+let the API move stored times to the new dates; `--is-full-day` drops stored times.
+
+Custom thumbnails preserve aspect ratio and require both dimensions, each from
+1 to 2000 pixels. Omitting both uses the default thumbnail. The API caches sizes
+and may reject excess sizes with HTTP 422. Existing overwrite protection applies.
 
 ### Agent mode
 
@@ -136,6 +183,12 @@ Errors are a single JSON line on stderr:
 ### Rate limiting
 
 The API allows 200 requests per minute by default. The CLI enforces this client-side and retries `429` responses, honoring `Retry-After`. For tenants with a different limit, use `--rate-limit`, `SEVENTHINGS_RATE_LIMIT`, or `seventhings config set <profile> --profile-rate-limit N`. The limit applies per process.
+
+The CLI shares one transport limit across API calls and authentication; the SDK's
+additional default limiter is disabled so CLI overrides (including `0`) still
+work. Valid `Retry-After` delays are honored in full, including those above 60
+seconds; missing or invalid values use bounded exponential backoff. Waiting is
+cancelable. SDK response headers are retained on API errors without being logged.
 
 ## Interactive UI
 

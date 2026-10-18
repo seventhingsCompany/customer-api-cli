@@ -91,7 +91,7 @@ func TestRetry429ReplaysBody(t *testing.T) {
 		return nil
 	}
 
-	c := client.NewWithToken(srv.URL, "tok", client.WithHTTPClient(&http.Client{Transport: tr}))
+	c := client.NewWithToken(srv.URL, "tok", client.WithHTTPClient(&http.Client{Transport: tr}), client.WithRateLimit(0))
 	uuid, err := c.ObjectCreate(context.Background(), map[string]any{"name": "Laptop"})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestRetriesExhausted(t *testing.T) {
 	tr := New(nil, 0, WithMaxRetries(2))
 	noSleep(tr, &slept)
 
-	c := client.NewWithToken(srv.URL, "tok", client.WithHTTPClient(&http.Client{Transport: tr}))
+	c := client.NewWithToken(srv.URL, "tok", client.WithHTTPClient(&http.Client{Transport: tr}), client.WithRateLimit(0))
 	_, err := c.ObjectGet(context.Background(), "x")
 	if !models.IsRateLimited(err) {
 		t.Fatalf("err = %v, want 429 APIError", err)
@@ -182,20 +182,29 @@ func TestContextCancelWhileWaiting(t *testing.T) {
 }
 
 func TestRetryAfterParsing(t *testing.T) {
-	if d := retryAfter("5", 0); d != 5*time.Second {
+	header := func(v string) http.Header { return http.Header{"Retry-After": {v}} }
+	if d := retryAfter(header("5"), 0); d != 5*time.Second {
 		t.Errorf("seconds: %v", d)
 	}
-	if d := retryAfter("9999", 0); d != maxBackoff {
-		t.Errorf("cap: %v", d)
+	if d := retryAfter(header("9999"), 0); d != 9999*time.Second {
+		t.Errorf("server delay must not be shortened: %v", d)
 	}
 	date := time.Now().Add(3 * time.Second).UTC().Format(http.TimeFormat)
-	if d := retryAfter(date, 0); d < time.Second || d > 3*time.Second {
+	if d := retryAfter(header(date), 0); d < time.Second || d > 3*time.Second {
 		t.Errorf("date: %v", d)
 	}
 	for attempt, want := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
-		d := retryAfter("", attempt)
+		d := retryAfter(nil, attempt)
 		if d < want || d >= want+want/2 {
 			t.Errorf("backoff attempt %d: %v", attempt, d)
+		}
+	}
+	for _, invalid := range []http.Header{
+		header("9223372037"), header("-1"), header("1.5"), header("not a date"),
+		{"Retry-After": {"1", "2"}},
+	} {
+		if d := retryAfter(invalid, 0); d < time.Second || d >= 1500*time.Millisecond {
+			t.Errorf("invalid header %v: backoff = %s", invalid, d)
 		}
 	}
 }

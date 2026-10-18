@@ -147,7 +147,9 @@ type fakeDeps struct {
 	settings Settings
 }
 
-func (d *fakeDeps) Client() (*client.Client, error) { return client.NewWithToken(d.url, "tok"), nil }
+func (d *fakeDeps) Client() (*client.Client, error) {
+	return client.NewWithToken(d.url, "tok", client.WithRateLimit(0)), nil
+}
 func (d *fakeDeps) LoggedIn() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()

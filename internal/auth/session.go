@@ -54,8 +54,9 @@ type SessionConfig struct {
 // NewSession builds a session from cfg.
 func NewSession(cfg SessionConfig) *Session {
 	s := &Session{
-		Profile:   cfg.Profile,
-		refresher: client.New(cfg.URL, client.WithHTTPClient(cfg.HTTP), client.WithClientID(cfg.ClientID)),
+		Profile: cfg.Profile,
+		// The CLI transport shares one limit across API and token requests.
+		refresher: client.New(cfg.URL, client.WithHTTPClient(cfg.HTTP), client.WithClientID(cfg.ClientID), client.WithRateLimit(0)),
 		now:       time.Now,
 	}
 	switch {

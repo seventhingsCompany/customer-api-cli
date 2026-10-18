@@ -7,10 +7,10 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
+	"github.com/SeventhingsCompany/customer-api-go/models"
 	"golang.org/x/time/rate"
 )
 
@@ -108,7 +108,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return resp, err
 		}
 
-		wait := retryAfter(resp.Header.Get("Retry-After"), attempt)
+		wait := retryAfter(resp.Header, attempt)
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 
@@ -156,14 +156,10 @@ func rewind(req *http.Request) (*http.Request, error) {
 
 // retryAfter parses a Retry-After header (seconds or HTTP date), falling back
 // to exponential backoff with jitter.
-func retryAfter(header string, attempt int) time.Duration {
-	if header != "" {
-		if secs, err := strconv.Atoi(header); err == nil && secs >= 0 {
-			return min(time.Duration(secs)*time.Second, maxBackoff)
-		}
-		if at, err := http.ParseTime(header); err == nil {
-			return min(max(time.Until(at), 0), maxBackoff)
-		}
+func retryAfter(header http.Header, attempt int) time.Duration {
+	apiErr := &models.APIError{Header: header}
+	if delay, ok := apiErr.RetryAfter(time.Now()); ok {
+		return delay
 	}
 	base := time.Second << attempt
 	jitter := time.Duration(rand.Int64N(int64(base / 2)))

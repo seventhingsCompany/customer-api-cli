@@ -1,13 +1,13 @@
 module github.com/SeventhingsCompany/customer-api-cli
 
-go 1.27.1
+go 1.27.2
 
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.10
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/SeventhingsCompany/customer-api-go v1.4.0
+	github.com/SeventhingsCompany/customer-api-go v1.5.1
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886
 	github.com/charmbracelet/x/ansi v0.11.8

@@ -62,7 +62,7 @@ func newFakeAPI(t *testing.T, valid string) (*fakeAPI, *httptest.Server) {
 
 func sdkClient(srv *httptest.Server, s *Session) *client.Client {
 	hc := &http.Client{Transport: &Transport{Base: http.DefaultTransport, Session: s}}
-	return client.NewWithToken(srv.URL, Placeholder, client.WithHTTPClient(hc), client.WithClientID("cid"))
+	return client.NewWithToken(srv.URL, Placeholder, client.WithHTTPClient(hc), client.WithClientID("cid"), client.WithRateLimit(0))
 }
 
 func TestRefreshOn401AndPersist(t *testing.T) {
