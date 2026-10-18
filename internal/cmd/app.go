@@ -252,7 +252,7 @@ func (a *App) Client() (*client.Client, error) {
 		rt = &dryRunTransport{Base: rt, Out: a.io.Out}
 	}
 	a.client = client.NewWithToken(url, auth.Placeholder,
-		client.WithHTTPClient(&http.Client{Transport: rt}), client.WithClientID(a.clientID()))
+		client.WithHTTPClient(&http.Client{Transport: rt}), client.WithClientID(a.clientID()), client.WithRateLimit(0))
 	return a.client, nil
 }
 

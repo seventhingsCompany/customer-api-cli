@@ -47,7 +47,7 @@ func (d tuiDeps) Login(ctx context.Context, url, clientID, username, password st
 	if err != nil {
 		return err
 	}
-	sdk := client.New(url, client.WithHTTPClient(&http.Client{Transport: base}))
+	sdk := client.New(url, client.WithHTTPClient(&http.Client{Transport: base}), client.WithRateLimit(0))
 	tok, err := sdk.Login(ctx, username, password, clientID)
 	if err != nil {
 		return err

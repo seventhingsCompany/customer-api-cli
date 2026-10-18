@@ -121,7 +121,14 @@ type resource struct {
 	hubOrder bool
 }
 
-func (r *resource) id(it Item) string { return str(it[r.idKey]) }
+func (r *resource) id(it Item) string {
+	id := str(it[r.idKey])
+	// Older room/location responses used uuid rather than template field keys.
+	if id == "" && (r.idKey == "room_uuid" || r.idKey == "location_uuid") {
+		return str(it["uuid"])
+	}
+	return id
+}
 
 // lookup reads a possibly dotted key ("object_data.internal_identifier").
 func lookup(it Item, key string) any {
@@ -285,7 +292,7 @@ func resources() []*resource {
 			hubOffer: true,
 		},
 		{
-			title: "Rooms", cli: "rooms", searchKey: "name", filterable: true, sort: sortMany, singular: "room", idKey: "uuid", template: models.AssetTrackingTemplateRoom,
+			title: "Rooms", cli: "rooms", searchKey: "name", filterable: true, sort: sortMany, singular: "room", idKey: "room_uuid", template: models.AssetTrackingTemplateRoom,
 			columns: []column{{"Name", "name", 4}, {"Number", "number", 2}, {"Location ID", "building_id", 2}, {"Updated", "updated_at", 3}},
 			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
 				return withoutTotal(cl.RoomsList(ctx, serverSearch(q)))
@@ -305,7 +312,7 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Locations", cli: "locations", searchKey: "name", filterable: true, sort: sortMany, singular: "location", idKey: "uuid",
+			title: "Locations", cli: "locations", searchKey: "name", filterable: true, sort: sortMany, singular: "location", idKey: "location_uuid",
 			columns: []column{{"Name", "name", 4}, {"ID", "id", 1}, {"City", "city", 3}, {"Address", "address", 4}, {"Country", "country", 2}},
 			fixed: []formField{
 				{key: "name", label: "Name", required: true, kind: models.FieldTypeText},
@@ -437,7 +444,6 @@ func resources() []*resource {
 				if err := input.Decode(b, &in); err != nil {
 					return "", err
 				}
-				in.Reminders = []models.TimeInterval{}
 				return cl.TaskCreate(ctx, in)
 			},
 			update: func(ctx context.Context, cl *client.Client, id string, b Item) error {
@@ -527,7 +533,7 @@ func resources() []*resource {
 					return err
 				}
 				var in models.UpdateRentalCase
-				if err := input.Merge(cur, b, &in, input.AttachmentUUIDs); err != nil {
+				if err := input.Merge(cur, b, &in, input.RentalCaseFixup(b)); err != nil {
 					return err
 				}
 				return cl.RentalCaseUpdate(ctx, id, in)

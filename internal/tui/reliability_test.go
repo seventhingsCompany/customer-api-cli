@@ -340,7 +340,7 @@ func (d *profileDeps) Profile() (string, string, string, string) {
 	return d.active, d.urls[d.active], "cid", "me"
 }
 func (d *profileDeps) Client() (*client.Client, error) {
-	return client.NewWithToken(d.urls[d.active], "tok"), nil
+	return client.NewWithToken(d.urls[d.active], "tok", client.WithRateLimit(0)), nil
 }
 func (d *profileDeps) LoggedIn() bool                  { return d.auth[d.active] }
 func (d *profileDeps) SwitchProfile(name string) error { d.active = name; return nil }

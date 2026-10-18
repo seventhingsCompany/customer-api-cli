@@ -152,3 +152,25 @@ func AttachmentUUIDs(m map[string]any) {
 	}
 	m["attachments"] = out
 }
+
+// RentalCaseFixup preserves replacement state while allowing the server to move
+// stored times when only dates change. Full-day conversion omits stored times.
+func RentalCaseFixup(changes map[string]any) func(map[string]any) {
+	return func(m map[string]any) {
+		AttachmentUUIDs(m)
+		fullDay, _ := changes["is_full_day"].(bool)
+		_, kindChanged := changes["is_full_day"]
+		_, issueChanged := changes["issue_at"]
+		_, dueChanged := changes["due_at"]
+		_, issueDateChanged := changes["issue_date"]
+		_, dueDateChanged := changes["due_date"]
+		moveDates := (issueDateChanged || dueDateChanged) && !kindChanged && !issueChanged && !dueChanged
+		if moveDates {
+			delete(m, "is_full_day")
+		}
+		if moveDates || fullDay {
+			delete(m, "issue_at")
+			delete(m, "due_at")
+		}
+	}
+}
