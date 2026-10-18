@@ -51,6 +51,7 @@ func (m *Model) openSettings() tea.Cmd {
 	m.setStatus("", false)
 	m.searching = false
 	m.search.Blur()
+	m.layout()
 	return nil
 }
 
@@ -63,10 +64,10 @@ func (m *Model) handleSettingsKey(k string) (tea.Model, tea.Cmd) {
 	case "tab", "right":
 		return m, m.switchTab(0)
 	case "shift+tab", "left":
-		return m, m.switchTab(len(m.res) - 1)
+		return m, m.switchPane(len(m.res) - 1)
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "C":
 		if n, ok := m.tabForKey(k); ok {
-			return m, m.switchTab(n)
+			return m, m.switchPane(n)
 		}
 	case "up", "k":
 		m.settingsRow = (m.settingsRow + settingsRows - 1) % settingsRows
@@ -191,7 +192,9 @@ func (m *Model) resetSession() tea.Cmd {
 		m.tabs[i] = tabState{page: 1, total: noTotal}
 	}
 	m.tab, m.settingsRow = 0, 0
+	m.paneViews = map[string]int{}
 	m.detailItem = nil
+	m.pictureIndex = 0
 	m.defs = map[models.AssetTrackingTemplate][]models.FieldDefinition{}
 	m.choiceCache = map[choiceSource][][2]string{}
 	m.pictures = map[string]*picture{}
@@ -204,7 +207,7 @@ func (m *Model) resetSession() tea.Cmd {
 	m.form, m.record, m.login, m.path = nil, nil, nil, nil
 	m.prefill, m.custom = nil, nil
 	m.pageSize = m.deps.Settings().PageSize
-	m.refreshTable()
+	m.layout()
 	m.search.SetValue("")
 	if cleanup != "" {
 		return tea.Raw(cleanup)

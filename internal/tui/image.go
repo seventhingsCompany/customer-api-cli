@@ -110,24 +110,40 @@ func rgb(c color.NRGBA64) string {
 }
 
 // pictureFile picks the image to preview for a record: the file itself on
-// the Files tab, otherwise the first image in the "picture" field, then in
-// any other attachment field.
+// the Files tab, otherwise the first image in the picture field (including
+// catalog_object_picture in a catalog's nested fields), then in other attachments.
 func pictureFile(it Item) (uuid, name string) {
-	if strings.HasPrefix(str(it["type"]), "image/") && str(it["uuid"]) != "" && it["data_uri"] != nil {
-		return str(it["uuid"]), str(it["name"])
+	files := pictureFiles(it)
+	if len(files) == 0 {
+		return "", ""
 	}
-	check := func(v any) (string, string) {
+	return files[0].uuid, files[0].name
+}
+
+type pictureRef struct{ uuid, name string }
+
+// pictureFiles keeps picture-field order, then sorted attachment fields, and
+// deduplicates by file UUID so a shared attachment appears only once.
+func pictureFiles(it Item) []pictureRef {
+	if strings.HasPrefix(str(it["type"]), "image/") && str(it["uuid"]) != "" && it["data_uri"] != nil {
+		return []pictureRef{{str(it["uuid"]), str(it["name"])}}
+	}
+	it = recordFileFields(it)
+	var result []pictureRef
+	seen := map[string]bool{}
+	collect := func(v any) {
 		files, _ := v.([]any)
 		for _, raw := range files {
 			f, _ := raw.(map[string]any)
-			if strings.HasPrefix(str(f["type"]), "image/") && str(f["uuid"]) != "" {
-				return str(f["uuid"]), str(f["name"])
+			uuid := str(f["uuid"])
+			if strings.HasPrefix(str(f["type"]), "image/") && uuid != "" && !seen[uuid] {
+				result = append(result, pictureRef{uuid, str(f["name"])})
+				seen[uuid] = true
 			}
 		}
-		return "", ""
 	}
-	if u, n := check(it["picture"]); u != "" {
-		return u, n
+	for _, key := range []string{catalogPrefix + "picture", "picture"} {
+		collect(it[key])
 	}
 	keys := make([]string, 0, len(it))
 	for k := range it {
@@ -135,11 +151,11 @@ func pictureFile(it Item) (uuid, name string) {
 	}
 	slices.Sort(keys) // deterministic choice
 	for _, k := range keys {
-		if u, n := check(it[k]); k != "picture" && u != "" {
-			return u, n
+		if k != "picture" && k != catalogPrefix+"picture" {
+			collect(it[k])
 		}
 	}
-	return "", ""
+	return result
 }
 
 // fetchPicture downloads a picture. Half blocks only need the thumbnail;

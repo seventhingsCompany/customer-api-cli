@@ -102,19 +102,21 @@ func pageCount(total, perPage int) int {
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	ctx  context.Context
-	deps Deps
-	res  []*resource
-	tabs []tabState
-	tab  int
-	mode mode
-	prev mode // mode to return to from confirm/form/history
+	ctx       context.Context
+	deps      Deps
+	res       []*resource
+	tabs      []tabState
+	tab       int
+	mode      mode
+	prev      mode           // mode to return to from confirm/form/history
+	paneViews map[string]int // last active subview of a grouped pane
 
 	width, height int
 	table         table.Model
 	detail        viewport.Model
 	help          viewport.Model
 	detailItem    Item
+	pictureIndex  int // selected image within the current detail record
 	search        textinput.Model
 	searching     bool
 	spinner       spinner.Model
@@ -184,6 +186,7 @@ func New(ctx context.Context, deps Deps) *Model {
 		choiceCache: map[choiceSource][][2]string{},
 		pictures:    map[string]*picture{},
 		reads:       map[int]context.CancelFunc{},
+		paneViews:   map[string]int{},
 	}
 	m.imageMode = strings.ToLower(deps.Env("SEVENTHINGS_IMAGES"))
 	switch m.imageMode {
@@ -269,11 +272,12 @@ type choicesMsg struct {
 type cmdMsg struct{ fn func() tea.Cmd }
 
 type doneMsg struct {
-	text   string
-	err    error
-	reload bool
-	back   bool // leave detail view (after delete)
-	scope  *operationScope
+	text      string
+	err       error
+	reload    bool
+	back      bool // leave detail view (after delete)
+	scope     *operationScope
+	reloadTab *int // optional destination when creating a different resource
 }
 
 type loginMsg struct{ err error }

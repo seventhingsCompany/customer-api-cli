@@ -17,6 +17,7 @@ func (m *Model) openDetail(it Item) tea.Cmd {
 	r := m.res[m.tab]
 	id := r.id(it)
 	m.navigate()
+	m.pictureIndex = 0
 	if r.get == nil || id == "" {
 		m.detailItem = it
 		m.mode = modeDetail
@@ -44,7 +45,7 @@ func (m *Model) refreshDetail() tea.Cmd {
 // wide terminals and above them on narrow ones. Returns the viewport content.
 func (m *Model) renderDetail() (string, tea.Cmd) {
 	it := m.detailItem
-	uuid, name := pictureFile(it)
+	uuid, name := m.currentPicture()
 	bodyH := max(m.height-m.chrome()-1, 3) // minus the title line
 	m.pane = detailPane{}
 	if uuid == "" || m.hidePictures {
@@ -100,12 +101,16 @@ func (m *Model) renderDetail() (string, tea.Cmd) {
 		m.pane.img, m.pane.uuid, m.pane.cols, m.pane.rows = p.img, uuid, c, r
 	}
 	// The caption sits above the picture, so an image never covers it.
-	const hints = " · p hides · O opens"
-	caption := dimStyle.Render(truncate(truncate(name, max(cols-lipgloss.Width(hints), 1))+hints, cols))
+	hints, prefix := " · p hides · O opens", ""
+	if count := len(pictureFiles(it)); count > 1 {
+		prefix = fmt.Sprintf("%d/%d ", min(m.pictureIndex, count-1)+1, count)
+		hints = " · [/] images"
+	}
+	caption := dimStyle.Render(truncate(prefix+truncate(name, max(cols-lipgloss.Width(hints)-len(prefix), 1))+hints, cols))
 	m.pane.content = lipgloss.JoinVertical(lipgloss.Left, caption, pic)
 	m.pane.side = side
 
-	const top = 5 // header, tabs, search line, title, caption
+	top := m.chrome() // header, tabs, search line, title, caption (+ subview row)
 	if side {
 		vpW := m.width - cols - 3
 		m.detail.SetWidth(vpW)

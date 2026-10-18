@@ -13,7 +13,7 @@ const catalogPrefix = "catalog_object_"
 
 func catalogResource() *resource {
 	return &resource{
-		title: "Catalog", cli: "catalog-items", shortcut: "C", singular: "catalog item", idKey: "uuid",
+		title: "Catalog", cli: "catalog-items", shortcut: "0", singular: "catalog item", idKey: "uuid",
 		searchKey: catalogPrefix + "inventory_name", filterable: true, sort: sortMany,
 		template: models.AssetTrackingTemplateAsset, fields: catalogFields,
 		columns: []column{

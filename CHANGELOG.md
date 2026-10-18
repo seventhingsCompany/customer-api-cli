@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.3.0
+
+- Add `objects create --from-catalog` and `b` in Catalog lists/details to review
+  and create an independent object with a new barcode and object-required fields.
+- Add image galleries to record details: `[`/`]` navigate ordered, deduplicated
+  images; captions show position, images load on demand, and `O` opens the
+  selected image. List paging and CHub order navigation are unchanged.
+- Show images in Catalog details, preferring `catalog_object_picture` and falling
+  back to other image attachments. Support existing image protocols, caching,
+  hide/show and opening catalog attachments in the system viewer.
+- Combine Hub items and Hub orders under one **CHub** pane, with `v` switching
+  between independent Items and Orders subviews. Move Catalog to `0`, retain
+  `C` as a Catalog alias, and preserve existing CLI commands.
+- Refresh both CHub subviews after hub writes and fit filter forms to short
+  terminals, including the subview navigation row.
+- Add `objects duplicate` and `catalog-items duplicate` with field overrides,
+  dry-run support, and a new UUID result.
+- Add `u` in object and catalog lists/details to review a prefilled copy before
+  creating it. Require a new object barcode and omit server-managed fields,
+  inherited barcodes, attachments, relationship lists and calculated fields.
+- Retain duplicate form input after failed submissions for manual retry.
+
 ## v0.2.2
 
 - Add the Catalog tab to the interactive UI, accessible with `C` or Tab after

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/SeventhingsCompany/customer-api-cli/internal/duplicate"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/exitcode"
 	"github.com/SeventhingsCompany/customer-api-go/client"
 	"github.com/SeventhingsCompany/customer-api-go/models"
@@ -61,6 +62,7 @@ func (a *App) objectsCmd() *cobra.Command {
 	}
 
 	c.AddCommand(
+		a.duplicateCmd(duplicate.Object, (*client.Client).ObjectCreate),
 		a.uuidActionCmd("archive", "Archive an object", "object", "Archived", true, (*client.Client).ObjectArchive),
 		a.uuidActionCmd("unarchive", "Unarchive an object", "object", "Unarchived", false, (*client.Client).ObjectUnarchive),
 		a.objectFilesCmd(),

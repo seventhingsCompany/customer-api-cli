@@ -117,7 +117,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			result.scope = &msg.scope
 			msg.msg = result
 			if result.err != nil && result.reload {
-				m.invalidateTab(msg.scope.tab)
+				tab := msg.scope.tab
+				if result.reloadTab != nil {
+					tab = *result.reloadTab
+				}
+				m.invalidatePane(tab)
 			}
 			if result.err != nil && msg.recovery != nil && msg.scope.nav == m.nav && msg.scope.tab == m.tab && !isAuthError(result.err) {
 				cmd := m.restoreForm(msg.recovery)
@@ -232,13 +236,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tab = msg.scope.tab
 			current = tab == m.tab && msg.scope.nav == m.nav
 		}
+		if msg.reloadTab != nil {
+			tab = *msg.reloadTab
+		}
 		if msg.back && current {
 			m.navigate()
 			m.mode = modeList
 		}
 		if msg.reload {
-			m.invalidateTab(tab)
-			if tab != m.tab || m.mode == modeSettings || m.mode == modeLogin || m.mode == modeForm || m.mode == modeConfirm {
+			m.invalidatePane(tab)
+			if m.paneRoot(tab) != m.paneRoot(m.tab) || m.mode == modeSettings || m.mode == modeLogin || m.mode == modeForm || m.mode == modeConfirm {
 				return m, nil
 			}
 			m.keepStatus = true
@@ -293,7 +300,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.writing > 0 && (m.mode == modeList || m.mode == modeDetail) {
 		switch k {
-		case "n", "N", "e", "E", "d", "c", "t", "a", "x", "o":
+		case "n", "N", "e", "E", "u", "b", "d", "c", "t", "a", "x", "o":
 			m.setStatus("An operation is already in progress", true)
 			return m, nil
 		}
@@ -338,6 +345,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleSettingsKey(k)
 	case modeDetail:
 		switch k {
+		case "[":
+			return m, m.stepPicture(-1)
+		case "]":
+			return m, m.stepPicture(1)
+		case "v":
+			return m, m.switchSubview()
 		case "esc", "q", "backspace":
 			m.navigate()
 			m.mode = modeList
@@ -402,20 +415,16 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.help.GotoTop()
 		return m, nil
 	case "tab", "right":
-		if m.tab == len(m.res)-1 {
-			return m, m.openSettings()
-		}
-		return m, m.switchTab(m.tab + 1)
+		return m, m.stepPane(1)
 	case "shift+tab", "left":
-		if m.tab == 0 {
-			return m, m.openSettings()
-		}
-		return m, m.switchTab(m.tab - 1)
+		return m, m.stepPane(-1)
+	case "v":
+		return m, m.switchSubview()
 	case ",":
 		return m, m.openSettings()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "C":
 		if n, ok := m.tabForKey(k); ok {
-			return m, m.switchTab(n)
+			return m, m.switchPane(n)
 		}
 		return m, nil
 	case "s", "/":
@@ -489,6 +498,17 @@ func (m *Model) action(k string, it Item) (tea.Cmd, bool) {
 	r := m.res[m.tab]
 	id := r.id(it)
 	switch k {
+	case "b":
+		if r.cli != "catalog-items" {
+			return nil, false
+		}
+		return m.startObjectFromCatalog(it), true
+	case "u":
+		if r.cli != "objects" && r.cli != "catalog-items" {
+			return nil, false
+		}
+		m.allFields = false
+		return m.startDuplicate(r, it), true
 	case "e", "E":
 		if r.update == nil {
 			return nil, false
@@ -585,10 +605,13 @@ func (m *Model) action(k string, it Item) (tea.Cmd, bool) {
 func (m *Model) switchTab(n int) tea.Cmd {
 	m.navigate()
 	m.tab = n
+	if pane := m.res[n].pane; pane != "" {
+		m.paneViews[pane] = n
+	}
 	m.mode = modeList
 	m.searching = false
 	m.search.SetValue(m.tabs[n].search)
-	m.refreshTable()
+	m.layout()
 	if !m.tabs[n].loaded {
 		return m.load()
 	}

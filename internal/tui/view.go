@@ -11,8 +11,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// chrome is the number of lines used by header, tabs, search and footer.
+// chrome counts header, tabs, search, footer and any subview navigation row.
 func (m *Model) chrome() int {
+	if m.hasSubviews() {
+		return 6
+	}
 	return 5
 }
 
@@ -173,7 +176,12 @@ func (m *Model) render() string {
 		}
 		searchLine = dimStyle.Render(page)
 	}
-	out := lipgloss.JoinVertical(lipgloss.Left, header, tabBar, searchLine, body, m.footer())
+	lines := []string{header, tabBar}
+	if m.hasSubviews() {
+		lines = append(lines, m.subviewBar())
+	}
+	lines = append(lines, searchLine, body, m.footer())
+	out := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(out)
 }
 
@@ -185,15 +193,15 @@ func (m *Model) tabBar(compact bool) string {
 		if m.onSettings() {
 			tabs = append(tabs, activeTab.Render("Settings"))
 		} else {
-			tabs = append(tabs, activeTab.Render(m.tabKey(m.tab)+" "+m.res[m.tab].title))
+			tabs = append(tabs, activeTab.Render(m.tabKey(m.paneRoot(m.tab))+" "+m.paneTitle(m.tab)))
 		}
-		for i, r := range m.res {
-			if r.shortcut != "" && (i != m.tab || m.onSettings()) {
-				tabs = append(tabs, tabStyle.Render(m.tabKey(i)+" "+r.title))
+		for _, i := range m.paneTabs() {
+			if m.res[i].shortcut != "" && (i != m.paneRoot(m.tab) || m.onSettings()) {
+				tabs = append(tabs, tabStyle.Render(m.tabKey(i)+" "+m.paneTitle(i)))
 			}
 		}
-		for i, r := range m.res {
-			if r.shortcut == "" && (i != m.tab || m.onSettings()) {
+		for _, i := range m.paneTabs() {
+			if m.res[i].shortcut == "" && (i != m.paneRoot(m.tab) || m.onSettings()) {
 				tabs = append(tabs, tabStyle.Render(m.tabKey(i)))
 			}
 		}
@@ -202,9 +210,9 @@ func (m *Model) tabBar(compact bool) string {
 		}
 		return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 	}
-	for i, r := range m.res {
-		label := fmt.Sprintf("%s %s", m.tabKey(i), r.title)
-		if i == m.tab && !m.onSettings() {
+	for _, i := range m.paneTabs() {
+		label := fmt.Sprintf("%s %s", m.tabKey(i), m.paneTitle(i))
+		if i == m.paneRoot(m.tab) && !m.onSettings() {
 			tabs = append(tabs, activeTab.Render(label))
 		} else {
 			tabs = append(tabs, tabStyle.Render(label))
@@ -249,8 +257,8 @@ func (m *Model) footer() string {
 }
 
 const helpText = "Keys (actions depend on the resource)\n\n" +
-	"tab / shift+tab: switch resource\n1–0: first ten resources\nC: product catalog\n,: settings and profile switching\n↑↓: select a row\nj / k: next / previous page (lists)\nPage Down / Page Up or ] / [: alternative paging keys\nj / k or ↑↓: scroll details, history and help\ns or /: search\nf: filter and sort\nesc: clear filters or cancel a pending read\nr: reload\n\n" +
-	"enter: open details\nn / N: new record (common / all fields)\ne / E: edit record (common / all fields)\nd: delete with confirmation\nh: history\nt: new task for object\na / x: attach / detach file\nO: open file in viewer\no: offer on hub / order hub item\nc: open / close task\nD: download file\ny: copy ID\nY: copy as CLI command\n\n? / esc: close this help\nq: quit\n"
+	"tab / shift+tab: switch pane\n1–8: objects through files\n9: CHub (last subview)\n0 / C: product catalog\nv: switch CHub Items / Orders\n,: settings and profile switching\n↑↓: select a row\nj / k: next / previous page (lists)\nPage Down / Page Up or ] / [: alternative paging keys\nj / k or ↑↓: scroll details, history and help\ns or /: search\nf: filter and sort\nesc: clear filters or cancel a pending read\nr: reload\n\n" +
+	"enter: open details\nn / N: new record (common / all fields)\ne / E: edit record (common / all fields)\nu: duplicate object / catalog item (review before creating)\nb: create object from catalog item\nd: delete with confirmation\nh: history\nt: new task for object\na / x: attach / detach file\n[ / ]: previous / next image (details only)\np: hide / show picture\nO: open selected image or file in viewer\no: offer on hub / order hub item\nc: open / close task\nD: download file\ny: copy ID\nY: copy as CLI command\n\n? / esc: close this help\nq: quit\n"
 
 func (m *Model) keyHelp() string {
 	if m.showHelp && m.mode == modeList {
@@ -271,13 +279,23 @@ func (m *Model) keyHelp() string {
 		return "↑↓ select · enter change · tab/1-0/C switch · q quit"
 	case modeDetail:
 		keys = append(keys, "↑↓ scroll", "esc back")
+		if m.hasSubviews() {
+			keys = append(keys, "v items/orders")
+		}
 		if u, _ := pictureFile(m.detailItem); u != "" && m.imageMode != imagesOff {
+			if len(pictureFiles(m.detailItem)) > 1 && !m.hidePictures {
+				keys = append(keys, "[/] images")
+			}
 			keys = append(keys, "p picture")
 		}
-		if u, _ := firstAttachment(m.detailItem); u != "" || r.download != nil {
+		picture, _ := pictureFile(m.detailItem)
+		if u, _ := firstAttachment(m.detailItem); u != "" || picture != "" || r.download != nil {
 			keys = append(keys, "O open")
 		}
 	default:
+		if m.hasSubviews() {
+			keys = append(keys, "v items/orders")
+		}
 		keys = append(keys, "enter open", "j/k page", "s search")
 		if r.filterable || r.sort != sortNone {
 			keys = append(keys, "f filter")
@@ -286,8 +304,14 @@ func (m *Model) keyHelp() string {
 			keys = append(keys, "n new")
 		}
 	}
+	if r.cli == "catalog-items" {
+		keys = append(keys, "b create object")
+	}
 	if r.update != nil {
 		keys = append(keys, "e edit")
+	}
+	if r.cli == "objects" || r.cli == "catalog-items" {
+		keys = append(keys, "u duplicate")
 	}
 	if r.del != nil {
 		keys = append(keys, "d delete")

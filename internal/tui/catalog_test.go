@@ -136,8 +136,8 @@ func catalogQuerySent(f *fakeAPI, key, value string) bool {
 func TestCatalogBrowseNavigationAndCopy(t *testing.T) {
 	f, _ := newCatalogAPI(t)
 	d := newDriver(t, &fakeDeps{url: f.srv.URL, loggedIn: true, settings: Settings{PageSize: 1}})
-	d.expect("C Catalog")
-	d.key("C")
+	d.expect("0 Catalog")
+	d.key("0")
 	d.expect("Catalog Laptop", "Example", "page 1 of 2")
 	d.key("y")
 	d.expect("Copied c1")
@@ -152,9 +152,9 @@ func TestCatalogBrowseNavigationAndCopy(t *testing.T) {
 	}
 	d.key("Y")
 	d.expect("catalog-items get c1")
-	d.key("esc", "0", "tab")
+	d.key("esc", "9", "tab")
 	if d.m.res[d.m.tab].cli != "catalog-items" {
-		t.Fatal("tab after Hub orders must open Catalog")
+		t.Fatal("tab after CHub must open Catalog")
 	}
 	d.key("tab")
 	if d.m.mode != modeSettings {
@@ -162,12 +162,17 @@ func TestCatalogBrowseNavigationAndCopy(t *testing.T) {
 	}
 	d.key("C")
 	d.expect("Catalog Laptop")
+	d.key(",", "0")
+	d.expect("Catalog Laptop", "0 Catalog")
+	if d.m.mode != modeList || d.m.res[d.m.tab].cli != "catalog-items" {
+		t.Fatal("0 from Settings must open Catalog")
+	}
 	d.key(",", "left")
 	if d.m.res[d.m.tab].cli != "catalog-items" {
 		t.Fatal("left from Settings must open Catalog")
 	}
 	seen := map[string]bool{}
-	for i := range d.m.res {
+	for _, i := range d.m.paneTabs() {
 		key := d.m.tabKey(i)
 		if seen[key] {
 			t.Fatalf("duplicate tab shortcut %s", key)
@@ -194,7 +199,7 @@ func TestCatalogSearchFilterSortAndSmallScreen(t *testing.T) {
 		t.Fatal("catalog sort was not retained")
 	}
 	d.send(tea.WindowSizeMsg{Width: 40, Height: 24})
-	d.expect("C Catalog", "Name")
+	d.expect("0 Catalog", "Name")
 	if displayName(d.m.selected(), "") != "Catalog Chair" {
 		t.Fatal("resizing lost the catalog selection")
 	}

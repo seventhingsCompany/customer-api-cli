@@ -319,7 +319,7 @@ func TestProgramEndToEnd(t *testing.T) {
 func TestListAndDetail(t *testing.T) {
 	f := newFakeAPI(t)
 	d := newDriver(t, &fakeDeps{url: f.srv.URL, loggedIn: true})
-	d.expect("Laptop Dell", "Desk", "2 objects on page 1", "1 Objects", "C Catalog")
+	d.expect("Laptop Dell", "Desk", "2 objects on page 1", "1 Objects", "0 Catalog")
 
 	d.key("down", "enter")
 	d.expect("inventory_name", "Desk", "esc back")
