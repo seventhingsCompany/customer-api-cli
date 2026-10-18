@@ -5,6 +5,7 @@ import (
 	"iter"
 	"maps"
 
+	"github.com/SeventhingsCompany/customer-api-cli/internal/duplicate"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/listflags"
 	"github.com/SeventhingsCompany/customer-api-go/client"
 	"github.com/SeventhingsCompany/customer-api-go/models"
@@ -86,6 +87,7 @@ previously created from a catalog item.`,
 	}
 	addBodyFlags(update, &data, &sets)
 	c.AddCommand(list, get, create, write(update),
+		a.duplicateCmd(duplicate.Catalog, (*client.Client).CatalogItemCreate),
 		a.uuidActionCmd("delete", "Delete a catalog item (existing objects are unchanged)", "catalog item", "Deleted", true, (*client.Client).CatalogItemDelete))
 	return c
 }

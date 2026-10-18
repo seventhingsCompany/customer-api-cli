@@ -80,7 +80,9 @@ type resource struct {
 	title    string
 	singular string
 	cli      string // CLI command group, e.g. "rental-cases" or "hub items"
-	shortcut string // nonnumeric shortcut for resources after the first ten
+	shortcut string // explicit pane shortcut, kept visible in the compact tab bar
+	// Resources sharing a pane appear as subviews of one top-level tab.
+	pane, subview string
 	// searchKey is the field a search matches on the server (like);
 	// resources without one search client-side.
 	searchKey string
@@ -133,6 +135,7 @@ func (r *resource) id(it Item) string {
 }
 
 func (m *Model) tabKey(i int) string {
+	i = m.paneRoot(i)
 	if key := m.res[i].shortcut; key != "" {
 		return key
 	}
@@ -140,7 +143,10 @@ func (m *Model) tabKey(i int) string {
 }
 
 func (m *Model) tabForKey(key string) (int, bool) {
-	for i := range m.res {
+	if key == "C" {
+		key = "0" // retain the original Catalog shortcut as an alias
+	}
+	for _, i := range m.paneTabs() {
 		if m.tabKey(i) == key {
 			return i, true
 		}
@@ -586,7 +592,7 @@ func resources() []*resource {
 			upload: uploadFile,
 		},
 		{
-			title: "Hub items", cli: "hub items", searchKey: "name", filterable: true, sort: sortMany, singular: "hub item", idKey: "id", hubOrder: true,
+			title: "Hub items", pane: "CHub", subview: "Items", cli: "hub items", searchKey: "name", filterable: true, sort: sortMany, singular: "hub item", idKey: "id", hubOrder: true,
 			columns: []column{{"ID", "id", 1}, {"Object ID", "asset_id", 1}, {"Barcode", "object_data.internal_identifier", 3},
 				{"Price", "price", 1}, {"Created", "created_at", 2}},
 			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
@@ -608,7 +614,7 @@ func resources() []*resource {
 			},
 		},
 		{
-			title: "Hub orders", cli: "hub orders", searchKey: "order_number", filterable: true, sort: sortMany, singular: "hub order", idKey: "id",
+			title: "Hub orders", pane: "CHub", subview: "Orders", cli: "hub orders", searchKey: "order_number", filterable: true, sort: sortMany, singular: "hub order", idKey: "id",
 			columns: []column{{"Order", "order_number", 3}, {"Created", "created_at", 3}, {"Total", "total_price", 2}, {"Completed", "completed", 1}, {"Cancelled", "cancelled", 1}},
 			load: func(ctx context.Context, cl *client.Client, q query) ([]Item, int, error) {
 				orders, err := cl.CircularityHubOrdersList(ctx, serverSearch(q))

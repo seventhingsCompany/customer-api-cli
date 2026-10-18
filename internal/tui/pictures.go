@@ -41,7 +41,7 @@ func pictureKey(uuid string, full bool) string {
 // per file and size. It does not count as loading, so the spinner stays
 // quiet.
 func (m *Model) loadPicture() tea.Cmd {
-	uuid, _ := pictureFile(m.detailItem)
+	uuid, _ := m.currentPicture()
 	full := m.gfx != gfxBlocks
 	key := pictureKey(uuid, full)
 	// A failed fetch is retried the next time the picture is needed.
@@ -123,8 +123,15 @@ func (m *Model) openInViewer(r *resource, it Item) tea.Cmd {
 	uuid, name := "", ""
 	if r.download != nil {
 		uuid, name = r.id(it), str(it["name"])
-	} else if uuid, name = pictureFile(it); uuid == "" {
-		uuid, name = firstAttachment(it)
+	} else {
+		if m.mode == modeDetail {
+			uuid, name = m.currentPicture()
+		} else {
+			uuid, name = pictureFile(it)
+		}
+		if uuid == "" {
+			uuid, name = firstAttachment(it)
+		}
 	}
 	if uuid == "" {
 		m.setStatus("No file to open", true)
@@ -155,9 +162,28 @@ func (m *Model) openInViewer(r *resource, it Item) tea.Cmd {
 	return cmd
 }
 
+func (m *Model) currentPicture() (uuid, name string) {
+	files := pictureFiles(m.detailItem)
+	if len(files) == 0 {
+		return "", ""
+	}
+	file := files[min(max(m.pictureIndex, 0), len(files)-1)]
+	return file.uuid, file.name
+}
+
+func (m *Model) stepPicture(delta int) tea.Cmd {
+	files := pictureFiles(m.detailItem)
+	if len(files) < 2 || m.imageMode == imagesOff || m.hidePictures {
+		return nil
+	}
+	m.pictureIndex = (m.pictureIndex + delta + len(files)) % len(files)
+	return tea.Batch(m.loadPicture(), m.refreshDetail())
+}
+
 // firstAttachment returns the first attached file of any type. Files are
 // told apart from other object lists (e.g. task references) by their size.
 func firstAttachment(it Item) (uuid, name string) {
+	it = recordFileFields(it)
 	keys := make([]string, 0, len(it))
 	for k := range it {
 		keys = append(keys, k)
@@ -173,4 +199,13 @@ func firstAttachment(it Item) (uuid, name string) {
 		}
 	}
 	return "", ""
+}
+
+// Catalog responses wrap their field map; ordinary object records are flat.
+// Keep the record itself intact so IDs, forms and CLI commands retain their shape.
+func recordFileFields(it Item) Item {
+	if fields, ok := it["fields"].(map[string]any); ok {
+		return fields
+	}
+	return it
 }

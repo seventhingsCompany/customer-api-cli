@@ -91,8 +91,12 @@ func (m *Model) openFilterForm() tea.Cmd {
 	m.navigate()
 	var fields []huh.Field
 	if r.filterable {
+		desc := "One per line: field op value, e.g. inventory_name like Laptop.\nOperators: = != > >= < <= like nlike in nin (and more, see --help)"
+		if m.width < 60 || m.height < 24 {
+			desc = "field op value; --help for operators"
+		}
 		fields = append(fields, huh.NewText().Title("Filter").
-			Description("One per line: field op value, e.g. inventory_name like Laptop.\nOperators: = != > >= < <= like nlike in nin (and more, see --help)").
+			Description(desc).
 			Lines(4).Value(&ff.filter).Validate(func(s string) error { _, err := parseFilters(s); return err }))
 	}
 	if r.sort != sortNone {
@@ -103,7 +107,7 @@ func (m *Model) openFilterForm() tea.Cmd {
 		fields = append(fields, huh.NewInput().Title("Sort").Description(desc).Value(&ff.sort).
 			Validate(func(s string) error { _, err := parseSorts(s, r); return err }))
 	}
-	ff.form = huh.NewForm(huh.NewGroup(fields...)).WithWidth(m.formWidth()).WithShowHelp(true).WithTheme(formTheme)
+	ff.form = huh.NewForm(huh.NewGroup(fields...)).WithWidth(m.formWidth()).WithHeight(m.formHeight()).WithShowHelp(true).WithTheme(formTheme)
 	m.filter = ff
 	m.form = ff.form
 	m.formKind = formFilter

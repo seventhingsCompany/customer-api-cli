@@ -69,13 +69,13 @@ For CI and agents, credentials can come from the environment instead:
 
 | Group | Commands |
 |---|---|
-| `objects` | list, count, get (UUID or `--barcode`), create, update, delete, archive, unarchive, files add/remove, history |
+| `objects` | list, count, get (UUID or `--barcode`), create, duplicate, update, delete, archive, unarchive, files add/remove, history |
 | `rooms`, `locations` | list, count, get, create, update, delete, history |
 | `persons` | list, count, get (UUID or `--id`), create, update, delete, create-user, history |
 | `users` | list, get |
 | `tasks` | list, get, create, update, set-status, delete, history |
 | `rental-cases` | list, get, create, update, delete, history |
-| `catalog-items` (alias `catalog`) | list, get, create, update, delete |
+| `catalog-items` (alias `catalog`) | list, get, create, duplicate, update, delete |
 | `files` | list, get, upload, download, thumbnail |
 | `fields` | list, mandatory, missing, get, create, update |
 | `hub items`, `hub orders` | circularity hub: list, get, update, delete, add-objects, suggestions, orders |
@@ -125,6 +125,44 @@ seventhings catalog-items delete <uuid> --yes
 Updates merge your fields into the current field map before sending PUT, so
 omitted fields are retained. Use `--set 'field_key:=null'` to clear a field.
 Updating or deleting an item does not change objects created from it.
+
+Create an independent inventory object from catalog master data:
+
+```sh
+seventhings objects create --from-catalog <catalog-uuid> --set barcode=NEW-123
+seventhings objects create --from-catalog <catalog-uuid> --set barcode=NEW-123 --set actual_room:=7 --dry-run
+```
+
+This reads the full item and object schema, translates `catalog_object_` keys to
+object keys, and copies writable scalar fields. Supply a new barcode and any
+other mandatory object fields. `--set` and `--data` override the copied values;
+IDs, audit fields, attachments (including images), relationship lists and
+calculated fields are not inherited. The catalog item is unchanged. In the UI,
+press `b` on a catalog row or its details to review a prefilled object form.
+Esc cancels; failed submissions keep the form for correction and manual retry.
+
+### Duplicating objects and catalog items
+
+```sh
+seventhings objects duplicate <source-uuid> --set barcode=NEW-123
+seventhings objects duplicate <source-uuid> --set barcode=NEW-123 --set inventory_name='Laptop copy' --dry-run
+seventhings catalog-items duplicate <source-uuid> --set catalog_object_inventory_name='Laptop copy'
+```
+
+Duplication reads the full source and your instance's object-field definitions,
+then creates a new record without changing the source. It copies writable scalar
+fields defined in the schema, including custom fields and linked room, location,
+person and user IDs. IDs, audit/archive state, barcodes, attachments, relationship
+lists, calculated fields and fields absent from the schema are not copied.
+Objects require a new, nonempty barcode different from the source. Other unique
+fields may also need overrides according to your instance's rules.
+
+Use `--set` or `--data` (inline JSON, `@file`, or `-` for stdin) to override copied
+values, just as with create. The result contains the new `uuid`; `--dry-run` shows
+the create request without writing. In the interactive UI, select an object or
+catalog item and press `u` from the list or details to review a prefilled form.
+Submit to create the copy, or press Esc to cancel. Failed submissions retain the
+form for correction and manual retry.
 
 ### Timed rentals, reminders and thumbnails
 
@@ -193,20 +231,30 @@ cancelable. SDK response headers are retained on API errors without being logged
 ## Interactive UI
 
 `seventhings` (or `seventhings ui`) opens a full-screen UI with a tab for each resource:
-- **Catalog:** press `C` (or use Tab after Hub orders) to browse product catalog
+- **CHub:** one pane for circularity hub items and orders. Press `9` to open it,
+  then `v` to switch between **Items** and **Orders** from lists or details.
+  Each subview keeps its own search, filters, sort and page; returning to CHub
+  restores the last subview. Tab moves directly between Files, CHub and Catalog.
+  Item details, ordering with confirmation and deletion remain available in Items; order details are in
+  Orders. Copying with `Y` uses the matching `hub items` or `hub orders` command.
+- **Catalog:** press `0` (`C` also works), or use Tab after CHub, to browse product catalog
   items. Search, filter, sort, page through results, open details, create with
   `n`/`N`, edit with `e`/`E`, delete with confirmation, and copy IDs or CLI commands
   with `y`/`Y`. Forms use your instance's object-field definitions with catalog
   field prefixes; object-only requirements such as a barcode do not apply.
   Updates preserve fields you do not change, including fields the form cannot
   edit. Catalog changes do not modify objects previously created from an item.
+  Details preview images from `catalog_object_picture` or other image attachment
+  fields, using the same terminal image support as objects. Press `p` to hide or
+  show the preview, `[`/`]` to browse images, or `O` to open the selected image
+  in your system viewer. Press `b` to create an object from the selected item.
   The product catalog feature and appropriate permissions are required; a
-  permission error does not prevent using other tabs. Existing `1`–`0` shortcuts
+  permission error does not prevent using other tabs. The `1`–`8` shortcuts
   are unchanged, and Settings remains last.
 - **Browse:** select rows with `↑`/`↓`; press `j` for the next page and `k` for the previous page (Page Down/Up and `]`/`[` also work). Search with `s` (or `/`), `enter` opens details, `h` shows history. In details, history, help and Settings, `j`/`k` move down/up instead. The footer shows "page X of Y" where the API reports a total. `esc` cancels a request that is still loading.
 - **Filter and sort:** `f` takes the same filters as `--filter` (one `field op value` per line) and a sort such as `-updated_at`, where the API supports them: objects, rooms, locations, rental cases and the circularity hub. Persons and users can only be sorted. `esc` clears the search, filter and sort.
 - **Copy:** `y` copies the selected record's ID. `Y` copies the CLI command for the current view, e.g. `seventhings objects list --filter 'inventory_name like Laptop' --sort -updated_at`. Copying uses OSC 52, which also works over SSH; in tmux, turn on `set-clipboard`.
-- **Pictures:** details show the record's picture, and the Files tab previews images. `p` hides or shows them. `O` opens the file (any type) in your system's default viewer; over SSH, use `D` to download it instead. The best supported format is detected automatically:
+- **Pictures:** details show the record's picture, and the Files tab previews images. `p` hides or shows them. For multiple images, `[` and `]` select the previous/next image (wrapping at the ends); the caption shows the current position. Only selected images are fetched and cached. `O` opens the selected image or file in your system's default viewer; over SSH, use `D` in the Files tab to download it instead. In lists, `[`/`]` still page through records. The best supported format is detected automatically:
   - full resolution with the [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) (kitty, Ghostty, WezTerm)
   - full resolution with iTerm2 inline images (iTerm2, and VS Code with `terminal.integrated.enableImages` turned on)
   - full resolution with Sixel (Windows Terminal, Konsole, foot, xterm)

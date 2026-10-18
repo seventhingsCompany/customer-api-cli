@@ -436,7 +436,8 @@ func uploadFile(ctx context.Context, cl *client.Client, path string) (string, er
 
 func (m *Model) formWidth() int { return max(min(m.width-4, 90), 30) }
 
-func (m *Model) formHeight() int { return max(m.height-m.chrome(), 5) }
+// huh renders its own help row in addition to the configured form height.
+func (m *Model) formHeight() int { return max(m.height-m.chrome()-1, 5) }
 
 func (m *Model) openLogin() {
 	_, url, clientID, username := m.deps.Profile()

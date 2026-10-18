@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"strings"
 
+	"github.com/SeventhingsCompany/customer-api-cli/internal/duplicate"
+	"github.com/SeventhingsCompany/customer-api-cli/internal/exitcode"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/input"
 	"github.com/SeventhingsCompany/customer-api-cli/internal/listflags"
 	"github.com/SeventhingsCompany/customer-api-go/client"
@@ -129,6 +132,7 @@ func (a *App) countCmd(r fieldResource) *cobra.Command {
 func (a *App) createCmd(r fieldResource) *cobra.Command {
 	var data string
 	var sets []string
+	var fromCatalog string
 	c := &cobra.Command{
 		Use:   "create",
 		Short: fmt.Sprintf("Create a %s", r.singular),
@@ -137,6 +141,9 @@ func (a *App) createCmd(r fieldResource) *cobra.Command {
   seventhings %[1]s create --data - --dry-run < %[2]s.json`, r.use, r.singular),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if r.use == "objects" && cmd.Flags().Changed("from-catalog") && strings.TrimSpace(fromCatalog) == "" {
+				return exitcode.Usagef("--from-catalog requires a catalog item UUID")
+			}
 			body, err := requireBody(data, sets, a)
 			if err != nil {
 				return err
@@ -144,6 +151,16 @@ func (a *App) createCmd(r fieldResource) *cobra.Command {
 			cl, err := a.Client()
 			if err != nil {
 				return err
+			}
+			if fromCatalog != "" {
+				draft, err := duplicate.ObjectFromCatalog(cmd.Context(), cl, fromCatalog)
+				if err != nil {
+					return err
+				}
+				body, err = draft.Body(body)
+				if err != nil {
+					return exitcode.Usagef("%s", err)
+				}
 			}
 			uuid, err := r.create(cl, cmd.Context(), body)
 			if err != nil {
@@ -153,6 +170,15 @@ func (a *App) createCmd(r fieldResource) *cobra.Command {
 		},
 	}
 	addBodyFlags(c, &data, &sets)
+	if r.use == "objects" {
+		c.Flags().StringVar(&fromCatalog, "from-catalog", "", "prefill from a catalog item UUID; requires a new barcode")
+		c.Long = `Create an object. With --from-catalog, read the catalog item and copy its
+writable scalar fields using object field keys (without catalog_object_).
+A new barcode is required. IDs, audit fields, attachments, relationship lists
+and calculated fields are not inherited. --set and --data override copied values.
+The catalog item is not changed; --dry-run previews the final create request.`
+		c.Example += "\n  seventhings objects create --from-catalog <uuid> --set barcode=NEW-123"
+	}
 	return write(c)
 }
 
