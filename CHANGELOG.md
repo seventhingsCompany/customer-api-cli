@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.1
+
+- Correct the case-sensitive Sigstore certificate identity in the installer and
+  verification instructions. Signatures identify the organization as
+  `seventhingsCompany`.
+- Add an installer identity regression test.
+- Includes all v0.2.0 changes below. The v0.2.0 publication was canceled before
+  release assets were published; its tag remains unchanged.
+
 ## v0.2.0
 
 ### Added

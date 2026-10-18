@@ -107,7 +107,7 @@ if command -v cosign >/dev/null 2>&1; then
 		fail "could not download the signature bundle"
 	cosign verify-blob "$TMP/checksums.txt" \
 		--bundle "$TMP/checksums.txt.sigstore.json" \
-		--certificate-identity-regexp '^https://github.com/SeventhingsCompany/customer-api-cli/' \
+		--certificate-identity-regexp '^https://github.com/seventhingsCompany/customer-api-cli/' \
 		--certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1 ||
 		fail "signature verification of checksums.txt failed"
 else
