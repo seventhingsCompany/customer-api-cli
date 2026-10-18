@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0
 
 - Add `objects create --from-catalog` and `b` in Catalog lists/details to review
   and create an independent object with a new barcode and object-required fields.
