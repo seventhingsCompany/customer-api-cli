@@ -528,9 +528,12 @@ func (m *Model) applyChoices(fields []*editField) error {
 
 func (m *Model) buildFields(r *resource, edit Item) []*editField {
 	var fields []*editField
-	if r.template != "" {
+	switch {
+	case r.fields != nil:
+		fields = r.fields(m.defs[r.template], edit, m.allFields)
+	case r.template != "":
 		fields = fieldsFromDefinitions(m.defs[r.template], r.template, edit, m.allFields)
-	} else {
+	default:
 		fields = fieldsFromFixed(r.fixed, edit)
 	}
 	if edit == nil {

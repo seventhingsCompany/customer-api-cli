@@ -73,6 +73,7 @@ func TestCLICommandRoundTrip(t *testing.T) {
 		{6, "", "status = open", "title", []string{"/rental-management/rental-cases?", "filter[status][eq]=open", "sort[title]=ASC"}},
 		{8, "chair", "", "", []string{"/circularity-hub/items?", "filter[name][like][]=chair"}},
 		{9, "", "", "-id", []string{"/circularity-hub/orders?", "sort[id]=DESC"}},
+		{10, "Laptop", "catalog_object_inventory_group = IT", "-id", []string{"/catalog-items?", "page=2", "filter[catalog_object_inventory_name][like][]=Laptop", "filter[catalog_object_inventory_group][eq]=IT", "sort[id]=DESC"}},
 	} {
 		line, err := tui.ListCommand(tc.tab, tc.search, tc.filter, tc.sort)
 		if err != nil {

@@ -9,7 +9,7 @@ func TestSettingsTab(t *testing.T) {
 	deps := &fakeDeps{url: f.srv.URL, loggedIn: true}
 	d := newDriver(t, deps)
 	d.key(",")
-	d.expect("1 Objects", "0 Hub orders", "Settings", "Profile", "test", "Page size", "50 rows", "Rate limit", "200 requests/min (default)", "Log out")
+	d.expect("C Catalog", "Settings", "Profile", "test", "Page size", "50 rows", "Rate limit", "200 requests/min (default)", "Log out")
 
 	// Page size: saved, and lists reload with it.
 	d.key("enter")

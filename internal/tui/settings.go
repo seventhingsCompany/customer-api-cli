@@ -64,12 +64,8 @@ func (m *Model) handleSettingsKey(k string) (tea.Model, tea.Cmd) {
 		return m, m.switchTab(0)
 	case "shift+tab", "left":
 		return m, m.switchTab(len(m.res) - 1)
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
-		n := int(k[0]-'0') - 1
-		if k == "0" {
-			n = 9
-		}
-		if n < len(m.res) {
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "C":
+		if n, ok := m.tabForKey(k); ok {
 			return m, m.switchTab(n)
 		}
 	case "up", "k":

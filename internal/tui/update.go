@@ -413,12 +413,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.switchTab(m.tab - 1)
 	case ",":
 		return m, m.openSettings()
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
-		n := int(k[0]-'0') - 1
-		if k == "0" {
-			n = 9
-		}
-		if n < len(m.res) {
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "C":
+		if n, ok := m.tabForKey(k); ok {
 			return m, m.switchTab(n)
 		}
 		return m, nil
